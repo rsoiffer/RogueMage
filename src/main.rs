@@ -6,6 +6,11 @@ use blocks::*;
 
 fn main() {
     App::new()
+        .insert_resource(WindowDescriptor {
+            width: 960.0,
+            height: 540.0,
+            ..Default::default()
+        })
         .add_plugins(DefaultPlugins)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .init_resource::<BlockTextureAtlasResource>()
@@ -22,13 +27,9 @@ fn main() {
 fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
-    mut windows: ResMut<Windows>,
     block_texture_atlas_resource: Res<BlockTextureAtlasResource>,
 ) {
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
-
-    let window = windows.get_primary_mut().unwrap();
-    window.set_resolution(960.0, 540.0);
 
     let stone = 1;
     let dirt = 2;
