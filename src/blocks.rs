@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy_rapier2d::prelude::*;
 
 #[derive(Default)]
 pub struct BlockTextureAtlasResource {
@@ -30,15 +31,24 @@ pub fn spawn_block(
     block_texture_atlas_resource: &Res<BlockTextureAtlasResource>,
     block: BlockInfo,
 ) {
-    commands.spawn().insert(block);
-    commands.spawn_bundle(SpriteSheetBundle {
-        texture_atlas: block_texture_atlas_resource.texture_atlas_handle.clone(),
-        transform: Transform::from_xyz(block.x as f32 * 32.0, block.y as f32 * 32.0, 1.0)
-            .with_scale(Vec3::splat(2.0)),
-        sprite: TextureAtlasSprite {
-            index: block.id,
+    commands
+        .spawn_bundle(SpriteSheetBundle {
+            texture_atlas: block_texture_atlas_resource.texture_atlas_handle.clone(),
+            transform: Transform::from_xyz(block.x as f32 * 32.0, block.y as f32 * 32.0, 1.0)
+                .with_scale(Vec3::splat(2.0)),
+            sprite: TextureAtlasSprite {
+                index: block.id,
+                ..Default::default()
+            },
             ..Default::default()
-        },
-        ..Default::default()
-    });
+        })
+        .insert_bundle(RigidBodyBundle {
+            body_type: RigidBodyType::Static.into(),
+            position: Vec2::new(block.x as f32 * 32.0, block.y as f32 * 32.0).into(),
+            ..Default::default()
+        })
+        .insert_bundle(ColliderBundle {
+            shape: ColliderShape::cuboid(16.0, 16.0).into(),
+            ..Default::default()
+        });
 }

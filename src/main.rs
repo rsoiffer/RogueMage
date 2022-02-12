@@ -6,14 +6,14 @@ use blocks::*;
 
 fn main() {
     App::new()
-        .insert_resource(ClearColor(Color::rgb(0.5, 0.7, 1.0)))
-        .insert_resource(RapierConfiguration {
-            gravity: Vector::y() * -9.81,
-            ..Default::default()
-        })
-        .init_resource::<BlockTextureAtlasResource>()
         .add_plugins(DefaultPlugins)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
+        .init_resource::<BlockTextureAtlasResource>()
+        .insert_resource(ClearColor(Color::rgb(0.5, 0.7, 1.0)))
+        .insert_resource(RapierConfiguration {
+            gravity: Vector::y() * -1000.0,
+            ..Default::default()
+        })
         .add_startup_system(setup_block_atlas.label("setup block atlas"))
         .add_startup_system(setup.after("setup block atlas"))
         .run();
@@ -61,7 +61,13 @@ fn setup(
             transform: Transform::from_xyz(100.0, 100.0, 2.0).with_scale(Vec3::splat(2.0)),
             ..Default::default()
         })
-        .insert_bundle(RigidBodyBundle::default())
-        .insert_bundle(ColliderBundle::default())
+        .insert_bundle(RigidBodyBundle {
+            position: Vec2::new(100.0, 100.0).into(),
+            ..Default::default()
+        })
+        .insert_bundle(ColliderBundle {
+            shape: ColliderShape::cuboid(16.0, 16.0).into(),
+            ..Default::default()
+        })
         .insert(RigidBodyPositionSync::Discrete);
 }
