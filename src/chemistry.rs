@@ -180,6 +180,7 @@ lazy_static! {
         rule(1.0).select2(any(Burning), Flammable).produce(1.0, Burning),
         rule(0.1).select2(Burning, area(1.0)).share(1.0, Burning),
         rule(0.1).consume(1.0, Burning),
+
         // Flammable
         rule(0.01).consume(1.0, Flammable),
         rule(1.0).select(Wet).consume(1.0, Flammable),
@@ -188,39 +189,48 @@ lazy_static! {
         rule(1.0).at_least(1.0, Flammable, 0.2, Wooden),
         rule(1.0).at_least(1.0, Flammable, 0.2, Grassy),
         rule(1.0).at_least(1.0, Flammable, 0.5, Oily),
+
         // Materials that burn
         rule(1.0).select(Burning).consume(1.0, Wooden).produce(1.0, BurntWooden),
         rule(1.0).select(Burning).consume(1.0, Frozen).produce(1.0, Wet),
         rule(0.5).select(Burning).consume(1.0, Wet),
         rule(1.0).select(Burning).consume(1.0, Grassy),
         rule(1.0).select(not(any(not(Burning)))).consume(1.0, Stone).produce(1.0, Lava),
+
         // Lava
         rule(1.0).select(Lava).produce(1.0, Burning),
         rule(1.0).select(Frozen).consume(1.0, Lava).produce(1.0, Stone),
+
         // Electric
         rule(1.0).at_most(1.0, Electric, 1.0, Conductive),
         rule(0.2).select3(Electric, area(1.0), Conductive).share(1.0, Electric),
         rule(1.0).select2(Electric, Flammable).produce(1.0, Burning),
+
         // Conductive
         rule(0.01).consume(1.0, Conductive),
         rule(1.0).at_least(1.0, Conductive, 0.5, Wet),
         rule(1.0).at_least(1.0, Conductive, 1.0, Metal),
+
         // Bright
         rule(1.0).at_most(1.0, Bright, 0.0, Unit),
         rule(1.0).select(Burning).produce(1.0, Bright),
         rule(1.0).select(Electric).produce(0.1, Bright),
+
         // Grassy
         rule(0.1).select3(Bright, sight(), Dirt).produce(1.0, Grassy),
         rule(1.0).at_most(1.0, Grassy, 1.0, Dirt),
+
         // Solid
         rule(1.0).at_most(1.0, Solid, 0.0, Solid),
         rule(1.0).produce(1.0, Solid),
         rule(1.0).select(Air).consume(1.0, Solid),
+
         // Mass
         rule(1.0).select(Solid).at_least(1.0, Gravity, 0.5, Unit).at_most(1.0, Gravity, 0.5, Unit),
         rule(1.0).select(Solid).at_most(1.0, Floaty, 0.0, Unit),
         rule(1.0).select(not(Solid)).at_most(1.0, Gravity, 0.0, Unit),
         rule(1.0).select(not(Solid)).at_least(1.0, Floaty, 0.1, Unit),
+
         // Motion
         rule(1.0).select(Gravity).produce(1.0, Downwards),
         rule(1.0).select(Floaty).produce(0.2, Upwards),
