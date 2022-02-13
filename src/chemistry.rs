@@ -265,7 +265,20 @@ lazy_static! {
 
 fn area(_radius: f32) -> Selector {
     // todo!()
-    Box::new(|_, _| HashMap::new())
+    // Box::new(|_, _| HashMap::new())
+    Box::new(move |query, entity| {
+        query
+            .iter()
+            .flat_map(|(e, c, t)| {
+                let dist = (query.get(entity).unwrap().2.translation - t.translation).length();
+                if dist < 50.0 * _radius {
+                    vec![(e, 1.0 / (1.0 + 0.02 * dist))]
+                } else {
+                    vec![]
+                }
+            })
+            .collect()
+    })
 }
 
 fn sight() -> Selector {
@@ -365,29 +378,22 @@ pub(crate) fn chemistry_system(
 }
 
 fn compute_effects(query: &SelectorQuery, entity: Entity, rule: &Rule) -> Vec<LoggedEffect> {
-    let targets = find_rule_targets(rule, query, entity);
-    let target_chems = &targets
-        .iter()
-        .map(|(&e, &v)| (query.get(e).unwrap().1, v))
-        .collect::<Vec<_>>();
-
-    let max_rule_strength = max_rule_strength(&rule.effects, target_chems);
-    if targets.iter().map(|x| x.1).sum::<f32>() < EPSILON || max_rule_strength < EPSILON {
+    let targets = &find_rule_targets(rule, query, entity);
+    let max_rule_strength = max_rule_strength(&rule.effects, &targets);
+    if targets.iter().map(|x| x.2).sum::<f32>() < EPSILON || max_rule_strength < EPSILON {
         return vec![];
     }
 
-    target_chems
+    targets
         .iter()
-        .flat_map(|(target_chem, connection)| {
+        .flat_map(|(target_entity, target_chem, connection)| {
             let strength = f32::min(rule.strength * connection, max_rule_strength);
             rule.effects.iter().map(move |effect| {
                 let (s, eq): (_, Box<dyn Fn(_) -> _>) = match effect {
                     Effect::Unary(UnaryOperator::Produce, s) => (s, Box::new(|_| 1.0)),
                     Effect::Unary(UnaryOperator::Consume, s) => (s, Box::new(|_| -1.0)),
                     Effect::Unary(UnaryOperator::Share, s) => {
-                        let vals = target_chems
-                            .iter()
-                            .map(|(e, v)| (e.get(s.property) * v, *v));
+                        let vals = targets.iter().map(|(e, c, v)| (c.get(s.property) * v, *v));
                         let average = weighted_average(vals);
                         (s, Box::new(move |x| average - x))
                     }
@@ -403,7 +409,7 @@ fn compute_effects(query: &SelectorQuery, entity: Entity, rule: &Rule) -> Vec<Lo
 
                 let d = strength * s.strength;
                 LoggedEffect {
-                    entity,
+                    entity: *target_entity,
                     property: s.property,
                     equation: Box::new(move |x| d * eq(x)),
                 }
@@ -412,7 +418,11 @@ fn compute_effects(query: &SelectorQuery, entity: Entity, rule: &Rule) -> Vec<Lo
         .collect()
 }
 
-fn find_rule_targets(rule: &Rule, query: &SelectorQuery, entity: Entity) -> HashMap<Entity, f32> {
+fn find_rule_targets<'a>(
+    rule: &Rule,
+    query: &'a SelectorQuery,
+    entity: Entity,
+) -> Vec<(Entity, &'a Chemistry, f32)> {
     let mut targets = HashMap::from([(entity, 1.0)]);
     for selector in &rule.selectors {
         let mut new_targets = HashMap::<Entity, f32>::new();
@@ -427,11 +437,14 @@ fn find_rule_targets(rule: &Rule, query: &SelectorQuery, entity: Entity) -> Hash
     }
 
     targets
+        .iter()
+        .map(|(&e, &v)| (e, query.get(e).unwrap().1, v))
+        .collect::<Vec<_>>()
 }
 
-fn max_rule_strength(effects: &Vec<Effect>, targets: &Vec<(&Chemistry, f32)>) -> f32 {
+fn max_rule_strength(effects: &Vec<Effect>, targets: &Vec<(Entity, &Chemistry, f32)>) -> f32 {
     let mut strength = f32::INFINITY;
-    for (c1, f1) in targets {
+    for (_, c1, f1) in targets {
         for effect in effects {
             let max_effect_strength = match effect {
                 Effect::Unary(UnaryOperator::Produce, s) if s.property.is_intrinsic() => {

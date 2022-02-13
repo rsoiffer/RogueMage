@@ -46,7 +46,7 @@ fn setup(
                 &block_texture_atlas_resource,
                 BlockInfo {
                     x,
-                    y: 0,
+                    y: 1,
                     id: PLANKS,
                 },
             );
