@@ -1,5 +1,13 @@
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
+use std::collections::HashMap;
+
+use crate::chemistry::*;
+
+pub const STONE: usize = 1;
+pub const DIRT: usize = 2;
+pub const GRASS: usize = 3;
+pub const PLANKS: usize = 4;
 
 #[derive(Default)]
 pub struct BlockTextureAtlasResource {
@@ -50,5 +58,40 @@ pub fn spawn_block(
         .insert_bundle(ColliderBundle {
             shape: ColliderShape::cuboid(16.0, 16.0).into(),
             ..Default::default()
-        });
+        })
+        .insert(new_chemistry(block));
+}
+
+fn new_chemistry(block: BlockInfo) -> Chemistry {
+    Chemistry {
+        significance: 1.0,
+        properties: match block.id {
+            stone => HashMap::from([(Property::Stone, 1.0)]),
+            dirt => HashMap::from([(Property::Dirt, 1.0)]),
+            grass => HashMap::from([
+                (Property::Dirt, 1.0),
+                (Property::Grassy, 1.0),
+                (Property::Burning, 0.1),
+            ]),
+            planks => HashMap::from([(Property::Wooden, 1.0)]),
+            _ => HashMap::from([(Property::Metal, 1.0)]),
+        },
+    }
+}
+
+pub(crate) fn update_block_sprites(mut query: Query<(&mut TextureAtlasSprite, &Chemistry)>) {
+    for (mut sprite, chemistry) in query.iter_mut() {
+        if chemistry.get(Property::Grassy) > 0.5 {
+            sprite.index = GRASS;
+        } else if chemistry.get(Property::Dirt) > 0.5 {
+            sprite.index = DIRT;
+        }
+
+        sprite.color = Color::rgba(
+            1.0,
+            1.0 - chemistry.get(Property::Burning),
+            1.0 - chemistry.get(Property::Burning),
+            1.0,
+        );
+    }
 }

@@ -3,7 +3,7 @@ use bevy::prelude::*;
 use std::collections::HashMap;
 
 #[derive(Clone, Copy, Eq, Hash, PartialEq)]
-enum Property {
+pub(crate) enum Property {
     Unit,
     Wet,
     Burning,
@@ -42,8 +42,8 @@ impl Property {
 
 #[derive(Component)]
 pub(crate) struct Chemistry {
-    significance: f32,
-    properties: HashMap<Property, f32>,
+    pub(crate) significance: f32,
+    pub(crate) properties: HashMap<Property, f32>,
 }
 
 impl Chemistry {
@@ -51,7 +51,7 @@ impl Chemistry {
         self.properties.insert(property, amt);
     }
 
-    fn get(&self, property: Property) -> f32 {
+    pub(crate) fn get(&self, property: Property) -> f32 {
         *self.properties.get(&property).unwrap_or(&0.0)
     }
 }
