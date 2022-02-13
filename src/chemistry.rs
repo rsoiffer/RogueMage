@@ -28,7 +28,16 @@ struct Chemistry {
     properties: HashMap<Property, f32>,
 }
 
-type Selector = Box<dyn Fn(World, Entity) -> HashMap<Entity, f32> + Sync>;
+impl Chemistry {
+    fn add(&mut self, property: Property, amt: f32) {
+        self.properties.insert(property, self.get(property) + amt);
+    }
+    fn get(&self, property: Property) -> f32 {
+        *self.properties.get(&property).unwrap_or(&0.0)
+    }
+}
+
+type Selector = Box<dyn Fn(&World, Entity) -> HashMap<Entity, f32> + Sync>;
 
 impl From<Property> for Selector {
     fn from(property: Property) -> Self {
@@ -152,5 +161,86 @@ fn rule(strength: f32) -> Rule {
         strength,
         selectors: vec![],
         effects: vec![],
+    }
+}
+
+struct DependentConstraint {
+    entity: Entity,
+    property: Property,
+    constraint: Effect,
+}
+
+fn chemistry_system(w: &World, chemistry_query: Query<(Entity, &mut Chemistry)>) {
+    // Initialize list of dependent constraints to empty list
+    // For each chemistry entity:
+    for (entity, chemistry) in chemistry_query.iter() {
+        // For each natural rule:
+        for rule in NATURAL_RULES. {
+            // Find the list of targets of the rule
+            // Find the effective strength of the rule
+            // Apply each intrinsic effect of the rule
+            // Log each dependent constraint of the rule
+        }
+    }
+    // Group all the dependent constraints by (entity, property)
+    // For each group of dependent constraints:
+    //   Compute the new value of the dependent property
+}
+
+fn find_rule_targets(rule: &Rule, world: &World, entity: Entity) -> HashMap<Entity, f32> {
+    let mut targets = HashMap::from([(entity, 1.0)]);
+    for selector in &rule.selectors {
+        let mut new_targets = HashMap::<Entity, f32>::new();
+        for (e1, f1) in &targets {
+            for (e2, f2) in selector(world, *e1) {
+                if f1 * f2 > EPSILON {
+                    new_targets.insert(e2, f1 * f2);
+                }
+            }
+        }
+        targets = new_targets;
+    }
+    return targets;
+}
+
+fn max_effect_strength(effects: Vec<Effect>, world: &World, targets: HashMap<Entity, f32>) -> f32 {
+    let mut strength = f32::INFINITY;
+    for (e1, f1) in &targets {
+        let c1 = world.entity(*e1).get::<Chemistry>().unwrap();
+        for effect in effects {
+            let max_effect_strength = match effect {
+                Effect::Unary(UnaryOperator::Produce, s) => (1.0 - c1.get(s.property)) / s.strength,
+                Effect::Unary(UnaryOperator::Consume, s) => c1.get(s.property) / s.strength,
+                _ => f32::INFINITY,
+            };
+            strength = f32::min(strength, max_effect_strength);
+        }
+    }
+    return strength;
+}
+
+fn apply_rule(rule: &Rule, w: &World, e: Entity) {
+    for (e1, f1) in &targets {
+        let c1 = w.entity(*e1).get::<Chemistry>().unwrap();
+        let mut strength = rule.strength * f1;
+        for effect in &rule.effects {
+            let max_effect_strength = match effect {
+                Effect::Unary(UnaryOperator::Produce, s) => (1.0 - c1.get(s.property)) / s.strength,
+                Effect::Unary(UnaryOperator::Consume, s) => c1.get(s.property) / s.strength,
+                _ => f32::INFINITY,
+            };
+            strength = f32::min(strength, max_effect_strength);
+        }
+        for effect in &rule.effects {
+            match effect {
+                Effect::Unary(UnaryOperator::Produce, s) => {
+                    c1.add(s.property, s.strength * strength);
+                }
+                Effect::Unary(UnaryOperator::Consume, s) => {
+                    c1.add(s.property, -s.strength * strength);
+                }
+                _ => {}
+            }
+        }
     }
 }
