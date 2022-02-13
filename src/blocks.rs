@@ -38,6 +38,7 @@ pub fn spawn_block(
     commands: &mut Commands,
     block_texture_atlas_resource: &Res<BlockTextureAtlasResource>,
     block: BlockInfo,
+    fire: f32,
 ) {
     commands
         .spawn_bundle(SpriteSheetBundle {
@@ -59,22 +60,22 @@ pub fn spawn_block(
             shape: ColliderShape::cuboid(16.0, 16.0).into(),
             ..Default::default()
         })
-        .insert(new_chemistry(block));
+        .insert(new_chemistry(block, fire));
 }
 
-fn new_chemistry(block: BlockInfo) -> Chemistry {
+fn new_chemistry(block: BlockInfo, fire: f32) -> Chemistry {
     Chemistry {
         significance: 1.0,
         properties: match block.id {
-            STONE => HashMap::from([(Property::Stone, 1.0)]),
-            DIRT => HashMap::from([(Property::Dirt, 1.0)]),
+            STONE => HashMap::from([(Property::Stone, 1.0), (Property::Burning, fire)]),
+            DIRT => HashMap::from([(Property::Dirt, 1.0), (Property::Burning, fire)]),
             GRASS => HashMap::from([
                 (Property::Dirt, 1.0),
                 (Property::Grassy, 1.0),
-                (Property::Burning, 0.1),
+                (Property::Burning, fire),
             ]),
-            PLANKS => HashMap::from([(Property::Wooden, 1.0)]),
-            _ => HashMap::from([(Property::Metal, 1.0)]),
+            PLANKS => HashMap::from([(Property::Wooden, 1.0), (Property::Burning, fire)]),
+            _ => HashMap::from([(Property::Metal, 1.0), (Property::Burning, fire)]),
         },
     }
 }

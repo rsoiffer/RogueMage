@@ -49,25 +49,29 @@ fn setup(
                     y: 1,
                     id: PLANKS,
                 },
+                0.0,
             );
         }
         spawn_block(
             &mut commands,
             &block_texture_atlas_resource,
             BlockInfo { x, y: 0, id: GRASS },
+            if x == 0 { 0.01 } else { 0.0 },
         );
         for y in -3..0 {
             spawn_block(
                 &mut commands,
                 &block_texture_atlas_resource,
                 BlockInfo { x, y, id: DIRT },
+                0.0,
             );
         }
-        for y in -10..-3 {
+        for y in -6..-3 {
             spawn_block(
                 &mut commands,
                 &block_texture_atlas_resource,
                 BlockInfo { x, y, id: STONE },
+                0.0,
             );
         }
     }

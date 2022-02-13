@@ -434,6 +434,9 @@ fn find_rule_targets<'a>(
             }
         }
         targets = new_targets;
+        if targets.len() == 0 {
+            return vec![];
+        }
     }
 
     targets
