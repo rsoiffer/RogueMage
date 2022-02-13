@@ -1,3 +1,5 @@
+use crate::math_utils::*;
+
 use self::Property::*;
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -363,30 +365,30 @@ fn compute_effects(
     query: &Query<(Entity, &mut Chemistry)>,
     rule: &Rule,
 ) -> Vec<LoggedEffect> {
-    let targets = &find_rule_targets(rule, world, entity);
-    let max_rule_strength = max_rule_strength(&rule.effects, world, &targets);
+    let targets = find_rule_targets(rule, world, entity);
+    let target_chems = &targets
+        .iter()
+        .map(|(&e, &v)| (query.get(e).unwrap().1, v))
+        .collect::<Vec<_>>();
+
+    let max_rule_strength = max_rule_strength(&rule.effects, world, target_chems);
     if targets.iter().map(|x| x.1).sum::<f32>() < EPSILON || max_rule_strength < EPSILON {
         return vec![];
     }
 
-    targets
+    target_chems
         .iter()
-        .flat_map(move |(&target, connection)| {
-            let target_chem = query.get(target).unwrap().1;
+        .flat_map(|(target_chem, connection)| {
             let strength = f32::min(rule.strength * connection, max_rule_strength);
             rule.effects.iter().map(move |effect| {
                 let (s, eq): (_, Box<dyn Fn(_) -> _>) = match effect {
-                    Effect::Unary(UnaryOperator::Produce, s) => (s, Box::new(move |_| 1.0)),
-                    Effect::Unary(UnaryOperator::Consume, s) => (s, Box::new(move |_| -1.0)),
+                    Effect::Unary(UnaryOperator::Produce, s) => (s, Box::new(|_| 1.0)),
+                    Effect::Unary(UnaryOperator::Consume, s) => (s, Box::new(|_| -1.0)),
                     Effect::Unary(UnaryOperator::Share, s) => {
-                        let values = targets
+                        let vals = target_chems
                             .iter()
-                            .map(|(&e, &v)| (query.get(e).unwrap().1.get(s.property) * v, v))
-                            .collect::<Vec<_>>();
-
-                        let average = values.iter().map(|x| x.0).sum::<f32>()
-                            / values.iter().map(|x| x.1).sum::<f32>();
-
+                            .map(|(e, v)| (e.get(s.property) * v, *v));
+                        let average = weighted_average(vals);
                         (s, Box::new(move |x| average - x))
                     }
                     Effect::Binary(s1, BinaryOperator::AtLeast, s2) => {
@@ -426,10 +428,13 @@ fn find_rule_targets(rule: &Rule, world: &World, entity: Entity) -> HashMap<Enti
     return targets;
 }
 
-fn max_rule_strength(effects: &Vec<Effect>, world: &World, targets: &HashMap<Entity, f32>) -> f32 {
+fn max_rule_strength(
+    effects: &Vec<Effect>,
+    world: &World,
+    targets: &Vec<(&Chemistry, f32)>,
+) -> f32 {
     let mut strength = f32::INFINITY;
-    for (e1, f1) in targets {
-        let c1 = world.entity(*e1).get::<Chemistry>().unwrap();
+    for (c1, f1) in targets {
         for effect in effects {
             let max_effect_strength = match effect {
                 Effect::Unary(UnaryOperator::Produce, s) if s.property.is_intrinsic() => {

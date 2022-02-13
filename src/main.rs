@@ -3,6 +3,7 @@ extern crate lazy_static;
 
 mod blocks;
 mod chemistry;
+mod math_utils;
 
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
