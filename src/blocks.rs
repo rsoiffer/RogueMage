@@ -66,14 +66,14 @@ fn new_chemistry(block: BlockInfo) -> Chemistry {
     Chemistry {
         significance: 1.0,
         properties: match block.id {
-            stone => HashMap::from([(Property::Stone, 1.0)]),
-            dirt => HashMap::from([(Property::Dirt, 1.0)]),
-            grass => HashMap::from([
+            STONE => HashMap::from([(Property::Stone, 1.0)]),
+            DIRT => HashMap::from([(Property::Dirt, 1.0)]),
+            GRASS => HashMap::from([
                 (Property::Dirt, 1.0),
                 (Property::Grassy, 1.0),
                 (Property::Burning, 0.1),
             ]),
-            planks => HashMap::from([(Property::Wooden, 1.0)]),
+            PLANKS => HashMap::from([(Property::Wooden, 1.0)]),
             _ => HashMap::from([(Property::Metal, 1.0)]),
         },
     }
@@ -89,8 +89,8 @@ pub(crate) fn update_block_sprites(mut query: Query<(&mut TextureAtlasSprite, &C
 
         sprite.color = Color::rgba(
             1.0,
-            1.0 - chemistry.get(Property::Burning),
-            1.0 - chemistry.get(Property::Burning),
+            1.0 - 5.0 * chemistry.get(Property::Burning),
+            1.0 - 5.0 * chemistry.get(Property::Burning),
             1.0,
         );
     }

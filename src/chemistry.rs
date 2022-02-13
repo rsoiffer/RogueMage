@@ -4,7 +4,7 @@ use self::Property::*;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
-#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Property {
     Unit,
     Wet,
@@ -58,12 +58,17 @@ impl Chemistry {
     }
 }
 
-type Selector = Box<dyn Fn(&World, Entity) -> HashMap<Entity, f32> + Sync>;
+type SelectorComponents<'a> = (Entity, &'a Chemistry, &'a Transform);
+
+type SelectorQuery<'world, 'state, 'component> =
+    Query<'world, 'state, SelectorComponents<'component>>;
+
+type Selector = Box<dyn Fn(&SelectorQuery, Entity) -> HashMap<Entity, f32> + Sync>;
 
 impl From<Property> for Selector {
     fn from(property: Property) -> Self {
-        Box::new(move |world, entity| {
-            let chemistry = world.entity(entity).get::<Chemistry>().unwrap();
+        Box::new(move |query, entity| {
+            let chemistry = query.get_component::<Chemistry>(entity).unwrap();
             match chemistry.properties.get(&property) {
                 None => HashMap::new(),
                 Some(&value) => HashMap::from([(entity, value)]),
@@ -259,11 +264,13 @@ lazy_static! {
 }
 
 fn area(_radius: f32) -> Selector {
-    todo!()
+    // todo!()
+    Box::new(|_, _| HashMap::new())
 }
 
 fn sight() -> Selector {
-    todo!()
+    // todo!()
+    Box::new(|_, _| HashMap::new())
 }
 
 fn any(selector: impl Into<Selector>) -> Selector {
@@ -301,24 +308,21 @@ struct LoggedEffect {
 }
 
 pub(crate) fn chemistry_system(
-    world: Res<World>,
-    mut chemistry_query: Query<(Entity, &mut Chemistry)>,
+    mut queries: QuerySet<(QueryState<SelectorComponents>, QueryState<&mut Chemistry>)>,
 ) {
     // Initialize list of effects to empty list
     let mut effect_log = Vec::new();
+
     // For each chemistry entity:
-    for (entity, _) in chemistry_query.iter() {
+    let q0 = queries.q0();
+    for (entity, _, _) in q0.iter() {
         // For each natural rule:
         for rule in NATURAL_RULES.iter() {
             // Log each effect of the rule
-            effect_log.extend(compute_effects(
-                world.as_ref(),
-                entity,
-                &chemistry_query,
-                rule,
-            ));
+            effect_log.extend(compute_effects(&q0, entity, rule));
         }
     }
+
     // Group all the effects by (entity, property)
     let mut groups = HashMap::<(Entity, Property), Vec<Box<dyn Fn(f32) -> f32>>>::new();
     for logged_effect in effect_log {
@@ -328,9 +332,10 @@ pub(crate) fn chemistry_system(
     }
 
     // For each group of effects:
+    let mut q1 = queries.q1();
     for ((entity, property), equations) in groups {
-        let mut chemistry = chemistry_query.get_mut(entity).unwrap().1;
-        let f = |x| equations.iter().map(|f| f(x)).sum::<f32>();
+        let mut chemistry = q1.get_mut(entity).unwrap();
+        let f = |x| 0.01 * equations.iter().map(|f| f(x)).sum::<f32>();
 
         let new_value = if property.is_intrinsic() {
             let current = chemistry.get(property);
@@ -359,19 +364,14 @@ pub(crate) fn chemistry_system(
     }
 }
 
-fn compute_effects(
-    world: &World,
-    entity: Entity,
-    query: &Query<(Entity, &mut Chemistry)>,
-    rule: &Rule,
-) -> Vec<LoggedEffect> {
-    let targets = find_rule_targets(rule, world, entity);
+fn compute_effects(query: &SelectorQuery, entity: Entity, rule: &Rule) -> Vec<LoggedEffect> {
+    let targets = find_rule_targets(rule, query, entity);
     let target_chems = &targets
         .iter()
         .map(|(&e, &v)| (query.get(e).unwrap().1, v))
         .collect::<Vec<_>>();
 
-    let max_rule_strength = max_rule_strength(&rule.effects, world, target_chems);
+    let max_rule_strength = max_rule_strength(&rule.effects, target_chems);
     if targets.iter().map(|x| x.1).sum::<f32>() < EPSILON || max_rule_strength < EPSILON {
         return vec![];
     }
@@ -412,12 +412,12 @@ fn compute_effects(
         .collect()
 }
 
-fn find_rule_targets(rule: &Rule, world: &World, entity: Entity) -> HashMap<Entity, f32> {
+fn find_rule_targets(rule: &Rule, query: &SelectorQuery, entity: Entity) -> HashMap<Entity, f32> {
     let mut targets = HashMap::from([(entity, 1.0)]);
     for selector in &rule.selectors {
         let mut new_targets = HashMap::<Entity, f32>::new();
-        for (e1, f1) in &targets {
-            for (e2, f2) in selector(world, *e1) {
+        for (&e1, f1) in &targets {
+            for (e2, f2) in selector(query, e1) {
                 if f1 * f2 > EPSILON {
                     new_targets.insert(e2, f1 * f2);
                 }
@@ -425,14 +425,11 @@ fn find_rule_targets(rule: &Rule, world: &World, entity: Entity) -> HashMap<Enti
         }
         targets = new_targets;
     }
-    return targets;
+
+    targets
 }
 
-fn max_rule_strength(
-    effects: &Vec<Effect>,
-    world: &World,
-    targets: &Vec<(&Chemistry, f32)>,
-) -> f32 {
+fn max_rule_strength(effects: &Vec<Effect>, targets: &Vec<(&Chemistry, f32)>) -> f32 {
     let mut strength = f32::INFINITY;
     for (c1, f1) in targets {
         for effect in effects {
@@ -448,5 +445,6 @@ fn max_rule_strength(
             strength = f32::min(strength, max_effect_strength);
         }
     }
-    return strength;
+
+    strength
 }
