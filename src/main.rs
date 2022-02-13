@@ -7,6 +7,7 @@ mod chemistry;
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use blocks::*;
+use chemistry::*;
 
 fn main() {
     App::new()
@@ -25,6 +26,7 @@ fn main() {
         })
         .add_startup_system(setup_block_atlas.label("setup block atlas"))
         .add_startup_system(setup.after("setup block atlas"))
+        .add_system(chemistry_system)
         .run();
 }
 

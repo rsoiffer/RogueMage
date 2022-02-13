@@ -31,16 +31,26 @@ enum Property {
     Solid,
 }
 
+impl Property {
+    fn is_intrinsic(&self) -> bool {
+        match self {
+            Bright | Flammable | Conductive | Gravity | Floaty | Solid => false,
+            _ => true,
+        }
+    }
+}
+
 #[derive(Component)]
-struct Chemistry {
+pub(crate) struct Chemistry {
     significance: f32,
     properties: HashMap<Property, f32>,
 }
 
 impl Chemistry {
-    fn add(&mut self, property: Property, amt: f32) {
-        self.properties.insert(property, self.get(property) + amt);
+    fn set(&mut self, property: Property, amt: f32) {
+        self.properties.insert(property, amt);
     }
+
     fn get(&self, property: Property) -> f32 {
         *self.properties.get(&property).unwrap_or(&0.0)
     }
@@ -282,27 +292,122 @@ fn rule(strength: f32) -> Rule {
     }
 }
 
-struct DependentConstraint {
+struct LoggedEffect {
     entity: Entity,
     property: Property,
-    constraint: Effect,
+    equation: Box<dyn Fn(f32) -> f32>,
 }
 
-fn chemistry_system(w: &World, chemistry_query: Query<(Entity, &mut Chemistry)>) {
-    // Initialize list of dependent constraints to empty list
+pub(crate) fn chemistry_system(
+    world: Res<World>,
+    mut chemistry_query: Query<(Entity, &mut Chemistry)>,
+) {
+    // Initialize list of effects to empty list
+    let mut effect_log = Vec::new();
     // For each chemistry entity:
-    for (entity, chemistry) in chemistry_query.iter() {
+    for (entity, _) in chemistry_query.iter() {
         // For each natural rule:
-        for rule in NATURAL_RULES. {
-            // Find the list of targets of the rule
-            // Find the effective strength of the rule
-            // Apply each intrinsic effect of the rule
-            // Log each dependent constraint of the rule
+        for rule in NATURAL_RULES.iter() {
+            // Log each effect of the rule
+            effect_log.extend(compute_effects(
+                world.as_ref(),
+                entity,
+                &chemistry_query,
+                rule,
+            ));
         }
     }
-    // Group all the dependent constraints by (entity, property)
-    // For each group of dependent constraints:
-    //   Compute the new value of the dependent property
+    // Group all the effects by (entity, property)
+    let mut groups = HashMap::<(Entity, Property), Vec<Box<dyn Fn(f32) -> f32>>>::new();
+    for logged_effect in effect_log {
+        let e = groups.entry((logged_effect.entity, logged_effect.property));
+        let v = e.or_insert(vec![]);
+        v.push(logged_effect.equation);
+    }
+
+    // For each group of effects:
+    for ((entity, property), equations) in groups {
+        let mut chemistry = chemistry_query.get_mut(entity).unwrap().1;
+        let f = |x| equations.iter().map(|f| f(x)).sum::<f32>();
+
+        let new_value = if property.is_intrinsic() {
+            let current = chemistry.get(property);
+            f32::clamp(current + f(current), 0.0, 1.0)
+        } else {
+            if f(0.0) <= EPSILON {
+                0.0
+            } else if f(1.0) >= -EPSILON {
+                1.0
+            } else {
+                let mut val = 0.5;
+                let mut step = 0.25;
+                for _ in 0..10 {
+                    if f(val) > 0.0 {
+                        val += step;
+                    } else {
+                        val -= step;
+                    }
+                    step *= 0.5;
+                }
+                val
+            }
+        };
+
+        chemistry.set(property, new_value);
+    }
+}
+
+fn compute_effects(
+    world: &World,
+    entity: Entity,
+    query: &Query<(Entity, &mut Chemistry)>,
+    rule: &Rule,
+) -> Vec<LoggedEffect> {
+    let targets = &find_rule_targets(rule, world, entity);
+    let max_rule_strength = max_rule_strength(&rule.effects, world, &targets);
+    if targets.iter().map(|x| x.1).sum::<f32>() < EPSILON || max_rule_strength < EPSILON {
+        return vec![];
+    }
+
+    targets
+        .iter()
+        .flat_map(move |(&target, connection)| {
+            let target_chem = query.get(target).unwrap().1;
+            let strength = f32::min(rule.strength * connection, max_rule_strength);
+            rule.effects.iter().map(move |effect| {
+                let (s, eq): (_, Box<dyn Fn(_) -> _>) = match effect {
+                    Effect::Unary(UnaryOperator::Produce, s) => (s, Box::new(move |_| 1.0)),
+                    Effect::Unary(UnaryOperator::Consume, s) => (s, Box::new(move |_| -1.0)),
+                    Effect::Unary(UnaryOperator::Share, s) => {
+                        let values = targets
+                            .iter()
+                            .map(|(&e, &v)| (query.get(e).unwrap().1.get(s.property) * v, v))
+                            .collect::<Vec<_>>();
+
+                        let average = values.iter().map(|x| x.0).sum::<f32>()
+                            / values.iter().map(|x| x.1).sum::<f32>();
+
+                        (s, Box::new(move |x| average - x))
+                    }
+                    Effect::Binary(s1, BinaryOperator::AtLeast, s2) => {
+                        let rhs = s2.strength * target_chem.get(s2.property);
+                        (s1, Box::new(move |x| f32::max(0.0, rhs - x)))
+                    }
+                    Effect::Binary(s1, BinaryOperator::AtMost, s2) => {
+                        let rhs = s2.strength * target_chem.get(s2.property);
+                        (s1, Box::new(move |x| f32::min(0.0, rhs - x)))
+                    }
+                };
+
+                let d = strength * s.strength;
+                LoggedEffect {
+                    entity,
+                    property: s.property,
+                    equation: Box::new(move |x| d * eq(x)),
+                }
+            })
+        })
+        .collect()
 }
 
 fn find_rule_targets(rule: &Rule, world: &World, entity: Entity) -> HashMap<Entity, f32> {
@@ -321,44 +426,22 @@ fn find_rule_targets(rule: &Rule, world: &World, entity: Entity) -> HashMap<Enti
     return targets;
 }
 
-fn max_effect_strength(effects: Vec<Effect>, world: &World, targets: HashMap<Entity, f32>) -> f32 {
+fn max_rule_strength(effects: &Vec<Effect>, world: &World, targets: &HashMap<Entity, f32>) -> f32 {
     let mut strength = f32::INFINITY;
-    for (e1, f1) in &targets {
+    for (e1, f1) in targets {
         let c1 = world.entity(*e1).get::<Chemistry>().unwrap();
         for effect in effects {
             let max_effect_strength = match effect {
-                Effect::Unary(UnaryOperator::Produce, s) => (1.0 - c1.get(s.property)) / s.strength,
-                Effect::Unary(UnaryOperator::Consume, s) => c1.get(s.property) / s.strength,
+                Effect::Unary(UnaryOperator::Produce, s) if s.property.is_intrinsic() => {
+                    (1.0 - c1.get(s.property)) / (f1 * s.strength)
+                }
+                Effect::Unary(UnaryOperator::Consume, s) if s.property.is_intrinsic() => {
+                    c1.get(s.property) / (f1 * s.strength)
+                }
                 _ => f32::INFINITY,
             };
             strength = f32::min(strength, max_effect_strength);
         }
     }
     return strength;
-}
-
-fn apply_rule(rule: &Rule, w: &World, e: Entity) {
-    for (e1, f1) in &targets {
-        let c1 = w.entity(*e1).get::<Chemistry>().unwrap();
-        let mut strength = rule.strength * f1;
-        for effect in &rule.effects {
-            let max_effect_strength = match effect {
-                Effect::Unary(UnaryOperator::Produce, s) => (1.0 - c1.get(s.property)) / s.strength,
-                Effect::Unary(UnaryOperator::Consume, s) => c1.get(s.property) / s.strength,
-                _ => f32::INFINITY,
-            };
-            strength = f32::min(strength, max_effect_strength);
-        }
-        for effect in &rule.effects {
-            match effect {
-                Effect::Unary(UnaryOperator::Produce, s) => {
-                    c1.add(s.property, s.strength * strength);
-                }
-                Effect::Unary(UnaryOperator::Consume, s) => {
-                    c1.add(s.property, -s.strength * strength);
-                }
-                _ => {}
-            }
-        }
-    }
 }
