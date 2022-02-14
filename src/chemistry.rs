@@ -64,7 +64,7 @@ type SelectorComponents<'a> = (Entity, &'a Chemistry, &'a Transform);
 type SelectorQuery<'world, 'state, 'component> =
     Query<'world, 'state, SelectorComponents<'component>>;
 
-type Selector = Box<dyn Fn(&SelectorQuery, Entity) -> HashMap<Entity, f32> + Sync>;
+pub(crate) type Selector = Box<dyn Fn(&SelectorQuery, Entity) -> HashMap<Entity, f32> + Sync>;
 
 impl From<Property> for Selector {
     fn from(property: Property) -> Self {
@@ -78,40 +78,50 @@ impl From<Property> for Selector {
     }
 }
 
-enum UnaryOperator {
+#[derive(Clone, Copy)]
+pub(crate) enum UnaryOperator {
     Produce,
     Consume,
     Share,
 }
 
-enum BinaryOperator {
+#[derive(Clone, Copy)]
+pub(crate) enum BinaryOperator {
     AtLeast,
     AtMost,
 }
 
-struct ScaledProperty {
+pub(crate) struct ScaledProperty {
     strength: f32,
     property: Property,
 }
 
 impl ScaledProperty {
-    fn new(strength: f32, property: Property) -> ScaledProperty {
+    pub(crate) fn new(strength: f32, property: Property) -> ScaledProperty {
         ScaledProperty { strength, property }
     }
 }
 
-enum Effect {
+pub(crate) enum Effect {
     Unary(UnaryOperator, ScaledProperty),
     Binary(ScaledProperty, BinaryOperator, ScaledProperty),
 }
 
-struct Rule {
+pub(crate) struct Rule {
     strength: f32,
     selectors: Vec<Selector>,
     effects: Vec<Effect>,
 }
 
 impl Rule {
+    pub(crate) fn new(strength: f32, selectors: Vec<Selector>, effects: Vec<Effect>) -> Rule {
+        Rule {
+            strength,
+            selectors,
+            effects,
+        }
+    }
+
     fn select(mut self, selector: impl Into<Selector>) -> Rule {
         self.selectors.push(selector.into());
         self
@@ -267,7 +277,7 @@ lazy_static! {
     ];
 }
 
-fn area(_radius: f32) -> Selector {
+pub(crate) fn area(_radius: f32) -> Selector {
     Box::new(move |query, entity| {
         query
             .iter()
@@ -288,7 +298,7 @@ fn sight() -> Selector {
     Box::new(|_, _| HashMap::new())
 }
 
-fn any(selector: impl Into<Selector>) -> Selector {
+pub(crate) fn any(selector: impl Into<Selector>) -> Selector {
     let selector = selector.into();
     Box::new(move |world, entity| {
         selector(world, entity)
@@ -298,7 +308,7 @@ fn any(selector: impl Into<Selector>) -> Selector {
     })
 }
 
-fn not(selector: impl Into<Selector>) -> Selector {
+pub(crate) fn not(selector: impl Into<Selector>) -> Selector {
     let selector = selector.into();
     Box::new(move |world, entity| {
         selector(world, entity)

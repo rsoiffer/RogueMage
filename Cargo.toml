@@ -3,12 +3,11 @@ name = "rogue_mage"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-
 [dependencies]
 bevy = "0.6"
 bevy_rapier2d = "0.12.1"
 lazy_static = "1.4.0"
+nom = "7.1.0"
 rand = "0.8"
 rand_distr = "0.4"
 
