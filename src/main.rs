@@ -29,6 +29,8 @@ fn main() {
         .add_startup_system(setup.after("setup block atlas"))
         .add_system(chemistry_system)
         .add_system(update_block_sprites)
+        .add_system(update_chemistry_graphics)
+        .add_system(update_fire_particles)
         .run();
 }
 
@@ -39,40 +41,20 @@ fn setup(
 ) {
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 
+    let mut block_spawner = BlockSpawner {
+        commands: &mut commands,
+        block_texture_atlas_resource: &block_texture_atlas_resource,
+    };
     for x in -16..16 {
         if x % 5 < 2 {
-            spawn_block(
-                &mut commands,
-                &block_texture_atlas_resource,
-                BlockInfo {
-                    x,
-                    y: 1,
-                    id: PLANKS,
-                },
-                0.0,
-            );
+            block_spawner.spawn(x, 1, PLANKS);
         }
-        spawn_block(
-            &mut commands,
-            &block_texture_atlas_resource,
-            BlockInfo { x, y: 0, id: GRASS },
-            if x == 0 { 0.01 } else { 0.0 },
-        );
+        block_spawner.spawn_fire(x, 0, GRASS, if x == 0 { 0.1 } else { 0.0 });
         for y in -3..0 {
-            spawn_block(
-                &mut commands,
-                &block_texture_atlas_resource,
-                BlockInfo { x, y, id: DIRT },
-                0.0,
-            );
+            block_spawner.spawn(x, y, DIRT);
         }
         for y in -6..-3 {
-            spawn_block(
-                &mut commands,
-                &block_texture_atlas_resource,
-                BlockInfo { x, y, id: STONE },
-                0.0,
-            );
+            block_spawner.spawn(x, y, STONE);
         }
     }
 

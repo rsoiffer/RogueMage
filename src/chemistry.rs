@@ -15,6 +15,7 @@ pub(crate) enum Property {
     Wooden,
     BurntWooden,
     Dirt,
+    Clay,
     Stone,
     Metal,
     Flesh,
@@ -203,9 +204,10 @@ const EPSILON: f32 = 1e-6;
 lazy_static! {
     static ref NATURAL_RULES: Vec<Rule> = vec![
         // Burning
-        rule(1.0).select2(any(Burning), Flammable).produce(1.0, Burning),
-        rule(0.1).select2(Burning, area(1.0)).share(1.0, Burning),
+        rule(20.0).select(Burning).at_least(1.0, Burning, 1.0, Flammable),
+        rule(1.0).select2(Burning, area(1.0)).share(1.0, Burning),
         rule(0.1).consume(1.0, Burning),
+        rule(1.0).at_most(1.0, Burning, 1.0, Flammable),
 
         // Flammable
         rule(0.01).consume(1.0, Flammable),
@@ -213,14 +215,16 @@ lazy_static! {
         rule(1.0).select(Frozen).consume(1.0, Flammable),
         rule(1.0).at_least(1.0, Flammable, 0.1, Flesh),
         rule(1.0).at_least(1.0, Flammable, 0.2, Wooden),
-        rule(1.0).at_least(1.0, Flammable, 0.2, Grassy),
-        rule(1.0).at_least(1.0, Flammable, 0.5, Oily),
+        rule(1.0).at_least(1.0, Flammable, 0.1, Grassy),
+        rule(1.0).at_least(1.0, Flammable, 1.0, Oily),
 
         // Materials that burn
-        rule(1.0).select(Burning).consume(1.0, Wooden).produce(1.0, BurntWooden),
+        rule(2.0).select(Burning).consume(1.0, Wooden).produce(1.0, BurntWooden),
+        rule(0.1).select(Burning).consume(1.0, Dirt).produce(1.0, Clay),
         rule(1.0).select(Burning).consume(1.0, Frozen).produce(1.0, Wet),
         rule(0.5).select(Burning).consume(1.0, Wet),
-        rule(1.0).select(Burning).consume(1.0, Grassy),
+        rule(5.0).select(Burning).consume(1.0, Grassy),
+        rule(5.0).select(Burning).consume(1.0, Oily),
         rule(1.0).select(not(any(not(Burning)))).consume(1.0, Stone).produce(1.0, Lava),
 
         // Lava
@@ -264,8 +268,6 @@ lazy_static! {
 }
 
 fn area(_radius: f32) -> Selector {
-    // todo!()
-    // Box::new(|_, _| HashMap::new())
     Box::new(move |query, entity| {
         query
             .iter()
@@ -321,6 +323,7 @@ struct LoggedEffect {
 }
 
 pub(crate) fn chemistry_system(
+    time: Res<Time>,
     mut queries: QuerySet<(QueryState<SelectorComponents>, QueryState<&mut Chemistry>)>,
 ) {
     // Initialize list of effects to empty list
@@ -348,32 +351,36 @@ pub(crate) fn chemistry_system(
     let mut q1 = queries.q1();
     for ((entity, property), equations) in groups {
         let mut chemistry = q1.get_mut(entity).unwrap();
-        let f = |x| 0.01 * equations.iter().map(|f| f(x)).sum::<f32>();
+        let f = Box::new(move |x| equations.iter().map(|f| f(x)).sum::<f32>());
 
         let new_value = if property.is_intrinsic() {
             let current = chemistry.get(property);
-            f32::clamp(current + f(current), 0.0, 1.0)
+            current + time.delta_seconds() * f(current)
         } else {
-            if f(0.0) <= EPSILON {
-                0.0
-            } else if f(1.0) >= -EPSILON {
-                1.0
-            } else {
-                let mut val = 0.5;
-                let mut step = 0.25;
-                for _ in 0..10 {
-                    if f(val) > 0.0 {
-                        val += step;
-                    } else {
-                        val -= step;
-                    }
-                    step *= 0.5;
-                }
-                val
-            }
+            binary_search(f)
         };
 
-        chemistry.set(property, new_value);
+        chemistry.set(property, f32::clamp(new_value, 0.0, 1.0));
+    }
+}
+
+fn binary_search(f: Box<dyn Fn(f32) -> f32>) -> f32 {
+    if f(0.0) <= EPSILON {
+        0.0
+    } else if f(1.0) >= -EPSILON {
+        1.0
+    } else {
+        let mut val = 0.5;
+        let mut step = 0.25;
+        for _ in 0..10 {
+            if f(val) > 0.0 {
+                val += step;
+            } else {
+                val -= step;
+            }
+            step *= 0.5;
+        }
+        val
     }
 }
 
