@@ -3,6 +3,7 @@ use bevy::{
     asset::{AssetLoader, BoxedFuture, LoadContext, LoadedAsset},
     reflect::TypeUuid,
 };
+use simple_error::SimpleError;
 use std::str;
 
 #[derive(TypeUuid)]
@@ -20,7 +21,7 @@ impl AssetLoader for RulesAssetLoader {
     ) -> BoxedFuture<'a, Result<(), anyhow::Error>> {
         Box::pin(async move {
             let rules_file = str::from_utf8(bytes)?;
-            let rules = parse_rules_file(rules_file)?;
+            let rules = parse_rules_file(rules_file).map_err(SimpleError::new)?;
             load_context.set_default_asset(LoadedAsset::new(RulesAsset(rules)));
             Ok(())
         })

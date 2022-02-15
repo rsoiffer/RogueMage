@@ -16,7 +16,6 @@ use nom::{
     sequence::{delimited, preceded, terminated},
     Err, IResult,
 };
-use simple_error::SimpleError;
 use std::fmt::{self, Debug, Display, Formatter};
 
 #[derive(Clone)]
@@ -251,10 +250,10 @@ fn rules_file<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
     terminated(rule_set, preceded(multispace0, eof))(input)
 }
 
-pub(crate) fn parse_rules_file(input: &str) -> Result<Vec<Rule>, SimpleError> {
+pub(crate) fn parse_rules_file(input: &str) -> Result<Vec<Rule>, String> {
     match complete(rules_file)(input) {
         Ok((_, rules)) => Ok(rules),
-        Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(SimpleError::new(convert_error(input, e))),
+        Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(convert_error(input, e)),
         Err(Err::Incomplete(_)) => unreachable!(),
     }
 }
