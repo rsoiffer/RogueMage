@@ -1,6 +1,5 @@
+use self::{Property::*, Selector::*};
 use crate::math_utils::*;
-
-use self::Property::*;
 use bevy::prelude::*;
 use std::collections::HashMap;
 
@@ -64,33 +63,35 @@ type SelectorComponents<'a> = (Entity, &'a Chemistry, &'a Transform);
 type SelectorQuery<'world, 'state, 'component> =
     Query<'world, 'state, SelectorComponents<'component>>;
 
-pub(crate) type Selector = Box<dyn Fn(&SelectorQuery, Entity) -> HashMap<Entity, f32> + Sync>;
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum Selector {
+    Area,
+    Sight,
+    Property(Property),
+    Not(Box<Selector>),
+    Any(Box<Selector>),
+}
 
 impl From<Property> for Selector {
     fn from(property: Property) -> Self {
-        Box::new(move |query, entity| {
-            let chemistry = query.get_component::<Chemistry>(entity).unwrap();
-            match chemistry.properties.get(&property) {
-                None => HashMap::new(),
-                Some(&value) => HashMap::from([(entity, value)]),
-            }
-        })
+        Selector::Property(property)
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum UnaryOperator {
     Produce,
     Consume,
     Share,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum BinaryOperator {
     AtLeast,
     AtMost,
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct ScaledProperty {
     strength: f32,
     property: Property,
@@ -102,11 +103,13 @@ impl ScaledProperty {
     }
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) enum Effect {
     Unary(UnaryOperator, ScaledProperty),
     Binary(ScaledProperty, BinaryOperator, ScaledProperty),
 }
 
+#[derive(Debug, PartialEq)]
 pub(crate) struct Rule {
     strength: f32,
     selectors: Vec<Selector>,
@@ -215,7 +218,7 @@ lazy_static! {
     static ref NATURAL_RULES: Vec<Rule> = vec![
         // Burning
         rule(20.0).select(Burning).at_least(1.0, Burning, 1.0, Flammable),
-        rule(1.0).select2(Burning, area(1.0)).share(1.0, Burning),
+        rule(1.0).select2(Burning, Area).share(1.0, Burning),
         rule(0.1).consume(1.0, Burning),
         rule(1.0).at_most(1.0, Burning, 1.0, Flammable),
 
@@ -243,7 +246,7 @@ lazy_static! {
 
         // Electric
         rule(1.0).at_most(1.0, Electric, 1.0, Conductive),
-        rule(0.2).select3(Electric, area(1.0), Conductive).share(1.0, Electric),
+        rule(0.2).select3(Electric, Area, Conductive).share(1.0, Electric),
         rule(1.0).select2(Electric, Flammable).produce(1.0, Burning),
 
         // Conductive
@@ -257,7 +260,7 @@ lazy_static! {
         rule(1.0).select(Electric).produce(0.1, Bright),
 
         // Grassy
-        rule(0.1).select3(Bright, sight(), Dirt).produce(1.0, Grassy),
+        rule(0.1).select3(Bright, Sight, Dirt).produce(1.0, Grassy),
         rule(1.0).at_most(1.0, Grassy, 1.0, Dirt),
 
         // Solid
@@ -277,53 +280,72 @@ lazy_static! {
     ];
 }
 
-pub(crate) fn area(_radius: f32) -> Selector {
-    Box::new(move |query, entity| {
-        query
-            .iter()
-            .flat_map(|(e, c, t)| {
-                let dist = (query.get(entity).unwrap().2.translation - t.translation).length();
-                if dist < 50.0 * _radius {
-                    vec![(e, 1.0 / (1.0 + 0.02 * dist))]
-                } else {
-                    vec![]
-                }
-            })
-            .collect()
-    })
-}
-
-fn sight() -> Selector {
-    // todo!()
-    Box::new(|_, _| HashMap::new())
-}
-
-pub(crate) fn any(selector: impl Into<Selector>) -> Selector {
-    let selector = selector.into();
-    Box::new(move |world, entity| {
-        selector(world, entity)
-            .iter()
-            .map(|(&entity, &value)| (entity, if value > EPSILON { 1.0 } else { 0.0 }))
-            .collect()
-    })
-}
-
-pub(crate) fn not(selector: impl Into<Selector>) -> Selector {
-    let selector = selector.into();
-    Box::new(move |world, entity| {
-        selector(world, entity)
-            .iter()
-            .map(|(&entity, &value)| (entity, 1.0 - value))
-            .collect()
-    })
-}
-
 fn rule(strength: f32) -> Rule {
     Rule {
         strength,
         selectors: vec![],
         effects: vec![],
     }
+}
+
+fn select_property(
+    query: &SelectorQuery,
+    entity: Entity,
+    property: Property,
+) -> HashMap<Entity, f32> {
+    let chemistry = query.get_component::<Chemistry>(entity).unwrap();
+    match chemistry.properties.get(&property) {
+        None => HashMap::new(),
+        Some(&value) => HashMap::from([(entity, value)]),
+    }
+}
+
+fn select_area(query: &SelectorQuery, entity: Entity) -> HashMap<Entity, f32> {
+    const RADIUS: f32 = 1.0;
+
+    query
+        .iter()
+        .flat_map(|(e, _, t)| {
+            let dist = (query.get(entity).unwrap().2.translation - t.translation).length();
+            if dist < 50.0 * RADIUS {
+                vec![(e, 1.0 / (1.0 + 0.02 * dist))]
+            } else {
+                vec![]
+            }
+        })
+        .collect()
+}
+
+fn select_any(query: &SelectorQuery, entity: Entity, selector: &Selector) -> HashMap<Entity, f32> {
+    select(query, entity, selector)
+        .iter()
+        .map(|(&entity, &value)| (entity, if value > EPSILON { 1.0 } else { 0.0 }))
+        .collect()
+}
+
+fn select_not(query: &SelectorQuery, entity: Entity, selector: &Selector) -> HashMap<Entity, f32> {
+    select(query, entity, selector)
+        .iter()
+        .map(|(&entity, &value)| (entity, 1.0 - value))
+        .collect()
+}
+
+fn select(query: &SelectorQuery, entity: Entity, selector: &Selector) -> HashMap<Entity, f32> {
+    match selector {
+        Area => select_area(query, entity),
+        Sight => HashMap::new(), // TODO
+        Property(property) => select_property(query, entity, *property),
+        Not(selector) => select_not(query, entity, selector),
+        Any(selector) => select_any(query, entity, selector),
+    }
+}
+
+fn not(selector: impl Into<Selector>) -> Selector {
+    Not(Box::new(selector.into()))
+}
+
+fn any(selector: impl Into<Selector>) -> Selector {
+    Any(Box::new(selector.into()))
 }
 
 struct LoggedEffect {
@@ -410,7 +432,7 @@ fn compute_effects(query: &SelectorQuery, entity: Entity, rule: &Rule) -> Vec<Lo
                     Effect::Unary(UnaryOperator::Produce, s) => (s, Box::new(|_| 1.0)),
                     Effect::Unary(UnaryOperator::Consume, s) => (s, Box::new(|_| -1.0)),
                     Effect::Unary(UnaryOperator::Share, s) => {
-                        let vals = targets.iter().map(|(e, c, v)| (c.get(s.property) * v, *v));
+                        let vals = targets.iter().map(|(_, c, v)| (c.get(s.property) * v, *v));
                         let average = weighted_average(vals);
                         (s, Box::new(move |x| average - x))
                     }
@@ -444,7 +466,7 @@ fn find_rule_targets<'a>(
     for selector in &rule.selectors {
         let mut new_targets = HashMap::<Entity, f32>::new();
         for (&e1, f1) in &targets {
-            for (e2, f2) in selector(query, e1) {
+            for (e2, f2) in select(query, e1, selector) {
                 if f1 * f2 > EPSILON {
                     new_targets.insert(e2, f1 * f2);
                 }

@@ -1,6 +1,6 @@
 use self::{Atom::*, SExpr::*, SelectorKeyword::*};
 use crate::chemistry::{
-    self, BinaryOperator,
+    BinaryOperator,
     BinaryOperator::*,
     Effect, Property, Rule, ScaledProperty, Selector,
     UnaryOperator::{self, *},
@@ -10,7 +10,6 @@ use nom::{
     bytes::complete::tag,
     character::complete::{char, multispace0},
     combinator::{cut, map, map_res, value},
-    error::context,
     multi::{many0, many1},
     number::complete::float,
     sequence::{delimited, preceded},
@@ -20,17 +19,19 @@ use std::fmt::{self, Debug, Display, Formatter};
 
 #[derive(Clone)]
 enum SelectorKeyword {
-    Any,
-    Not,
     Area,
+    Sight,
+    Not,
+    Any,
 }
 
 impl Display for SelectorKeyword {
     fn fmt(&self, f: &mut Formatter) -> fmt::Result {
         f.write_str(match self {
-            Any => "any",
-            Not => "not",
             Area => "area",
+            Sight => "sight",
+            Not => "not",
+            Any => "any",
         })
     }
 }
@@ -121,9 +122,10 @@ fn property(input: &str) -> IResult<&str, Property> {
 
 fn selector_keyword(input: &str) -> IResult<&str, SelectorKeyword> {
     alt((
-        value(Any, tag("any")),
-        value(Not, tag("not")),
         value(Area, tag("area")),
+        value(Sight, tag("sight")),
+        value(Not, tag("not")),
+        value(Any, tag("any")),
     ))(input)
 }
 
@@ -156,7 +158,7 @@ fn list(input: &str) -> IResult<&str, Vec<SExpr>> {
     delimited(
         char('('),
         many1(preceded(multispace0, sexpr)),
-        context("closing paren", cut(preceded(multispace0, char(')')))),
+        cut(preceded(multispace0, char(')'))),
     )(input)
 }
 
@@ -167,11 +169,12 @@ fn sexpr(input: &str) -> IResult<&str, SExpr> {
 fn selector_expr(expr: &SExpr) -> Result<Selector, String> {
     match expr {
         Atom(Property(property)) => Ok((*property).into()),
+        Atom(SelectorKeyword(Area)) => Ok(Selector::Area),
+        Atom(SelectorKeyword(Sight)) => Ok(Selector::Sight),
         Atom(_) => Err(format!("Expected property, but found: {}", expr)),
         List(es) => match es.as_slice() {
-            [Atom(SelectorKeyword(Any)), e] => Ok(chemistry::any(selector_expr(e)?)),
-            [Atom(SelectorKeyword(Not)), e] => Ok(chemistry::not(selector_expr(e)?)),
-            [Atom(SelectorKeyword(Area))] => Ok(chemistry::area(1.0)),
+            [Atom(SelectorKeyword(Not)), e] => Ok(Selector::Not(Box::new(selector_expr(e)?))),
+            [Atom(SelectorKeyword(Any)), e] => Ok(Selector::Any(Box::new(selector_expr(e)?))),
             _ => Err(format!("Selector has an invalid form: {}", expr)),
         },
     }
@@ -205,11 +208,177 @@ fn effect_expr(expr: &SExpr) -> Result<Effect, String> {
     }
 }
 
+fn selector(input: &str) -> IResult<&str, Selector> {
+    map_res(sexpr, |e| selector_expr(&e))(input)
+}
+
+fn effect(input: &str) -> IResult<&str, Effect> {
+    map_res(sexpr, |e| effect_expr(&e))(input)
+}
+
 fn rule(input: &str) -> IResult<&str, Rule> {
     let (input, strength) = float(input)?;
-    let (input, _) = tag(":")(input)?;
-    let (input, selectors) = many0(map_res(sexpr, |e| selector_expr(&e)))(input)?;
-    let (input, _) = tag("=>")(input)?;
-    let (input, effects) = many0(map_res(sexpr, |e| effect_expr(&e)))(input)?;
+    let (input, _) = preceded(multispace0, tag(":"))(input)?;
+    let (input, selectors) = many0(preceded(multispace0, selector))(input)?;
+    let (input, _) = preceded(multispace0, tag("=>"))(input)?;
+    let (input, effects) = many0(preceded(multispace0, effect))(input)?;
     Ok((input, Rule::new(strength, selectors, effects)))
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::{
+        chemistry::{
+            BinaryOperator, Effect, Property, Rule, ScaledProperty, Selector, UnaryOperator,
+        },
+        parser::{effect, rule, selector},
+    };
+
+    #[test]
+    fn it_parses_area_selector() {
+        assert_eq!(Selector::Area, selector("area").unwrap().1);
+    }
+
+    #[test]
+    fn it_parses_sight_selector() {
+        assert_eq!(Selector::Sight, selector("sight").unwrap().1);
+    }
+
+    #[test]
+    fn it_parses_property_selector() {
+        assert_eq!(
+            Selector::Property(Property::Burning),
+            selector("Burning").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_not_selector() {
+        assert_eq!(
+            Selector::Not(Box::new(Selector::Property(Property::Burning))),
+            selector("(not Burning)").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_any_selector() {
+        assert_eq!(
+            Selector::Any(Box::new(Selector::Property(Property::Burning))),
+            selector("(any Burning)").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_nested_selector() {
+        assert_eq!(
+            Selector::Not(Box::new(Selector::Any(Box::new(Selector::Not(Box::new(
+                Selector::Property(Property::Burning)
+            )))))),
+            selector("(not (any (not Burning)))").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_produce_effect() {
+        assert_eq!(
+            Effect::Unary(
+                UnaryOperator::Produce,
+                ScaledProperty::new(1.0, Property::Burning)
+            ),
+            effect("(produce Burning)").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_consume_effect() {
+        assert_eq!(
+            Effect::Unary(
+                UnaryOperator::Consume,
+                ScaledProperty::new(1.0, Property::Burning)
+            ),
+            effect("(consume Burning)").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_share_effect() {
+        assert_eq!(
+            Effect::Unary(
+                UnaryOperator::Share,
+                ScaledProperty::new(1.0, Property::Burning)
+            ),
+            effect("(share Burning)").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_at_least_effect() {
+        assert_eq!(
+            Effect::Binary(
+                ScaledProperty::new(1.0, Property::Flammable),
+                BinaryOperator::AtLeast,
+                ScaledProperty::new(0.5, Property::Oily)
+            ),
+            effect("(Flammable at-least (0.5 Oily))").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_at_most_effect() {
+        assert_eq!(
+            Effect::Binary(
+                ScaledProperty::new(1.0, Property::Gravity),
+                BinaryOperator::AtMost,
+                ScaledProperty::new(0.5, Property::Unit)
+            ),
+            effect("(Gravity at-most (0.5 Unit))").unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_parses_rule_multiple_selectors() {
+        let expected_rule = Rule::new(
+            1.0,
+            vec![
+                Selector::Any(Box::new(Selector::Property(Property::Burning))),
+                Selector::Property(Property::Flammable),
+            ],
+            vec![Effect::Unary(
+                UnaryOperator::Produce,
+                ScaledProperty::new(1.0, Property::Burning),
+            )],
+        );
+
+        assert_eq!(
+            expected_rule,
+            rule("1: (any Burning) Flammable => (produce Burning)")
+                .unwrap()
+                .1
+        );
+    }
+
+    #[test]
+    fn it_parses_rule_multiple_effects() {
+        let expected_rule = Rule::new(
+            1.0,
+            vec![Selector::Property(Property::Burning)],
+            vec![
+                Effect::Unary(
+                    UnaryOperator::Consume,
+                    ScaledProperty::new(1.0, Property::Frozen),
+                ),
+                Effect::Unary(
+                    UnaryOperator::Produce,
+                    ScaledProperty::new(1.0, Property::Wet),
+                ),
+            ],
+        );
+
+        assert_eq!(
+            expected_rule,
+            rule("1: Burning => (consume Frozen) (produce Wet)")
+                .unwrap()
+                .1
+        );
+    }
 }
