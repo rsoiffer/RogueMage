@@ -8,12 +8,13 @@ use crate::chemistry::{
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{char, multispace0},
-    combinator::{cut, map, map_res, value},
+    character::complete::{char, multispace0, newline, space0},
+    combinator::{complete, cut, eof, map, map_res, value},
+    error::{convert_error, FromExternalError, ParseError},
     multi::{many0, many1},
     number::complete::float,
-    sequence::{delimited, preceded},
-    IResult,
+    sequence::{delimited, preceded, terminated},
+    Err, IResult,
 };
 use std::fmt::{self, Debug, Display, Formatter};
 
@@ -87,7 +88,7 @@ impl Display for SExpr {
     }
 }
 
-fn property(input: &str) -> IResult<&str, Property> {
+fn property<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Property, E> {
     alt((
         value(Property::Unit, tag("Unit")),
         value(Property::Wet, tag("Wet")),
@@ -120,7 +121,9 @@ fn property(input: &str) -> IResult<&str, Property> {
     ))(input)
 }
 
-fn selector_keyword(input: &str) -> IResult<&str, SelectorKeyword> {
+fn selector_keyword<'a, E: ParseError<&'a str>>(
+    input: &'a str,
+) -> IResult<&str, SelectorKeyword, E> {
     alt((
         value(Area, tag("area")),
         value(Sight, tag("sight")),
@@ -129,7 +132,7 @@ fn selector_keyword(input: &str) -> IResult<&str, SelectorKeyword> {
     ))(input)
 }
 
-fn unary_operator(input: &str) -> IResult<&str, UnaryOperator> {
+fn unary_operator<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, UnaryOperator, E> {
     alt((
         value(Produce, tag("produce")),
         value(Consume, tag("consume")),
@@ -137,14 +140,14 @@ fn unary_operator(input: &str) -> IResult<&str, UnaryOperator> {
     ))(input)
 }
 
-fn binary_operator(input: &str) -> IResult<&str, BinaryOperator> {
+fn binary_operator<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, BinaryOperator, E> {
     alt((
         value(AtLeast, tag("at-least")),
         value(AtMost, tag("at-most")),
     ))(input)
 }
 
-fn atom(input: &str) -> IResult<&str, Atom> {
+fn atom<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Atom, E> {
     alt((
         map(float, Float),
         map(property, Property),
@@ -154,7 +157,7 @@ fn atom(input: &str) -> IResult<&str, Atom> {
     ))(input)
 }
 
-fn list(input: &str) -> IResult<&str, Vec<SExpr>> {
+fn list<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, Vec<SExpr>, E> {
     delimited(
         char('('),
         many1(preceded(multispace0, sexpr)),
@@ -162,7 +165,7 @@ fn list(input: &str) -> IResult<&str, Vec<SExpr>> {
     )(input)
 }
 
-fn sexpr(input: &str) -> IResult<&str, SExpr> {
+fn sexpr<'a, E: ParseError<&'a str>>(input: &'a str) -> IResult<&str, SExpr, E> {
     alt((map(atom, Atom), map(list, List)))(input)
 }
 
@@ -208,21 +211,51 @@ fn effect_expr(expr: &SExpr) -> Result<Effect, String> {
     }
 }
 
-fn selector(input: &str) -> IResult<&str, Selector> {
+fn selector<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
+    input: &'a str,
+) -> IResult<&str, Selector, E> {
     map_res(sexpr, |e| selector_expr(&e))(input)
 }
 
-fn effect(input: &str) -> IResult<&str, Effect> {
+fn effect<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
+    input: &'a str,
+) -> IResult<&str, Effect, E> {
     map_res(sexpr, |e| effect_expr(&e))(input)
 }
 
-fn rule(input: &str) -> IResult<&str, Rule> {
+fn rule<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
+    input: &'a str,
+) -> IResult<&str, Rule, E> {
     let (input, strength) = float(input)?;
-    let (input, _) = preceded(multispace0, tag(":"))(input)?;
-    let (input, selectors) = many0(preceded(multispace0, selector))(input)?;
-    let (input, _) = preceded(multispace0, tag("=>"))(input)?;
-    let (input, effects) = many0(preceded(multispace0, effect))(input)?;
+    let (input, _) = preceded(space0, tag(":"))(input)?;
+    let (input, selectors) = many0(preceded(space0, selector))(input)?;
+    let (input, _) = preceded(space0, tag("=>"))(input)?;
+    let (input, effects) = many0(preceded(space0, effect))(input)?;
     Ok((input, Rule::new(strength, selectors, effects)))
+}
+
+fn rule_set<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
+    input: &'a str,
+) -> IResult<&str, Vec<Rule>, E> {
+    many0(delimited(
+        multispace0,
+        rule,
+        preceded(space0, alt((value((), newline), value((), eof)))),
+    ))(input)
+}
+
+fn rules_file<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
+    input: &'a str,
+) -> IResult<&str, Vec<Rule>, E> {
+    terminated(rule_set, eof)(input)
+}
+
+pub(crate) fn parse_rules_file(input: &str) -> Result<Vec<Rule>, String> {
+    match complete(rules_file)(input) {
+        Ok((_, rules)) => Ok(rules),
+        Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(convert_error(input, e)),
+        Err(Err::Incomplete(_)) => unreachable!(),
+    }
 }
 
 #[cfg(test)]
@@ -231,24 +264,25 @@ mod tests {
         chemistry::{
             BinaryOperator, Effect, Property, Rule, ScaledProperty, Selector, UnaryOperator,
         },
-        parser::{effect, rule, selector},
+        parser::{effect, rule, rules_file, selector},
     };
+    use nom::error::Error;
 
     #[test]
     fn it_parses_area_selector() {
-        assert_eq!(Selector::Area, selector("area").unwrap().1);
+        assert_eq!(Selector::Area, selector::<Error<_>>("area").unwrap().1);
     }
 
     #[test]
     fn it_parses_sight_selector() {
-        assert_eq!(Selector::Sight, selector("sight").unwrap().1);
+        assert_eq!(Selector::Sight, selector::<Error<_>>("sight").unwrap().1);
     }
 
     #[test]
     fn it_parses_property_selector() {
         assert_eq!(
             Selector::Property(Property::Burning),
-            selector("Burning").unwrap().1
+            selector::<Error<_>>("Burning").unwrap().1
         );
     }
 
@@ -256,7 +290,7 @@ mod tests {
     fn it_parses_not_selector() {
         assert_eq!(
             Selector::Not(Box::new(Selector::Property(Property::Burning))),
-            selector("(not Burning)").unwrap().1
+            selector::<Error<_>>("(not Burning)").unwrap().1
         );
     }
 
@@ -264,7 +298,7 @@ mod tests {
     fn it_parses_any_selector() {
         assert_eq!(
             Selector::Any(Box::new(Selector::Property(Property::Burning))),
-            selector("(any Burning)").unwrap().1
+            selector::<Error<_>>("(any Burning)").unwrap().1
         );
     }
 
@@ -274,7 +308,7 @@ mod tests {
             Selector::Not(Box::new(Selector::Any(Box::new(Selector::Not(Box::new(
                 Selector::Property(Property::Burning)
             )))))),
-            selector("(not (any (not Burning)))").unwrap().1
+            selector::<Error<_>>("(not (any (not Burning)))").unwrap().1
         );
     }
 
@@ -285,7 +319,7 @@ mod tests {
                 UnaryOperator::Produce,
                 ScaledProperty::new(1.0, Property::Burning)
             ),
-            effect("(produce Burning)").unwrap().1
+            effect::<Error<_>>("(produce Burning)").unwrap().1
         );
     }
 
@@ -296,7 +330,7 @@ mod tests {
                 UnaryOperator::Consume,
                 ScaledProperty::new(1.0, Property::Burning)
             ),
-            effect("(consume Burning)").unwrap().1
+            effect::<Error<_>>("(consume Burning)").unwrap().1
         );
     }
 
@@ -307,7 +341,7 @@ mod tests {
                 UnaryOperator::Share,
                 ScaledProperty::new(1.0, Property::Burning)
             ),
-            effect("(share Burning)").unwrap().1
+            effect::<Error<_>>("(share Burning)").unwrap().1
         );
     }
 
@@ -319,7 +353,9 @@ mod tests {
                 BinaryOperator::AtLeast,
                 ScaledProperty::new(0.5, Property::Oily)
             ),
-            effect("(Flammable at-least (0.5 Oily))").unwrap().1
+            effect::<Error<_>>("(Flammable at-least (0.5 Oily))")
+                .unwrap()
+                .1
         );
     }
 
@@ -331,7 +367,9 @@ mod tests {
                 BinaryOperator::AtMost,
                 ScaledProperty::new(0.5, Property::Unit)
             ),
-            effect("(Gravity at-most (0.5 Unit))").unwrap().1
+            effect::<Error<_>>("(Gravity at-most (0.5 Unit))")
+                .unwrap()
+                .1
         );
     }
 
@@ -351,7 +389,7 @@ mod tests {
 
         assert_eq!(
             expected_rule,
-            rule("1: (any Burning) Flammable => (produce Burning)")
+            rule::<Error<_>>("1: (any Burning) Flammable => (produce Burning)")
                 .unwrap()
                 .1
         );
@@ -376,9 +414,57 @@ mod tests {
 
         assert_eq!(
             expected_rule,
-            rule("1: Burning => (consume Frozen) (produce Wet)")
+            rule::<Error<_>>("1: Burning => (consume Frozen) (produce Wet)")
                 .unwrap()
                 .1
         );
+    }
+
+    #[test]
+    fn it_parses_rules_file() {
+        let expected_rules = vec![
+            Rule::new(
+                1.0,
+                vec![Selector::Property(Property::Flammable)],
+                vec![Effect::Unary(
+                    UnaryOperator::Produce,
+                    ScaledProperty::new(1.0, Property::Burning),
+                )],
+            ),
+            Rule::new(
+                0.1,
+                vec![Selector::Property(Property::Burning), Selector::Area],
+                vec![Effect::Unary(
+                    UnaryOperator::Share,
+                    ScaledProperty::new(1.0, Property::Burning),
+                )],
+            ),
+            Rule::new(
+                0.1,
+                vec![],
+                vec![Effect::Unary(
+                    UnaryOperator::Consume,
+                    ScaledProperty::new(1.0, Property::Burning),
+                )],
+            ),
+        ];
+
+        let actual_rules_file = "1: Flammable => (produce Burning)
+0.1: Burning area => (share Burning)
+
+0.1: => (consume Burning)";
+
+        assert_eq!(
+            expected_rules,
+            rules_file::<Error<_>>(actual_rules_file).unwrap().1
+        );
+    }
+
+    #[test]
+    fn it_requires_newline_between_rules() {
+        assert!(rules_file::<Error<_>>(
+            "1: Flammable => (produce Burning) 0.1: Burning area => (share Burning)"
+        )
+        .is_err());
     }
 }
