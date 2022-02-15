@@ -240,7 +240,7 @@ fn rule_set<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
     many0(delimited(
         multispace0,
         rule,
-        preceded(space0, alt((value((), line_ending), value((), eof)))),
+        preceded(space0, alt((line_ending, eof))),
     ))(input)
 }
 
