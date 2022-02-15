@@ -1,0 +1,48 @@
+1: (any Burning) Flammable => (produce Burning)
+0.1: Burning area => (share Burning)
+0.1: => (consume Burning)
+
+0.01: => (consume Flammable)
+1: Wet => (consume Flammable)
+1: Frozen => (consume Flammable)
+1: => (Flammable at-least (0.1 Flesh))
+1: => (Flammable at-least (0.2 Wooden))
+1: => (Flammable at-least (0.2 Grassy))
+1: => (Flammable at-least (0.5 Oily))
+
+1: Burning => (consume Wooden) (produce BurntWooden)
+1: Burning => (consume Frozen) (produce Wet)
+0.5: Burning => (consume Wet)
+1: Burning => (consume Grassy)
+1: (not (any (not Burning))) => (consume Stone) (produce Lava)
+
+1: Lava => (produce Burning)
+
+1: Frozen => (consume Lava) (produce Stone)
+
+1: => (Electric at-most Conductive)
+0.2: Electric area Conductive => (share Electric)
+1: Electric Flammable => (produce Burning)
+
+0.01: => (consume Conductive)
+1: => (Conductive at-least (0.5 Wet))
+1: => (Conductive at-least Metal)
+
+1: => (Bright at-most (0 Unit))
+1: Burning => (produce Bright)
+1: Electric => (produce (0.1 Bright))
+
+0.1: Bright sight Dirt => (produce Grassy)
+1: => (Grassy at-most Dirt)
+
+1: => (Solid at-most (0 Unit))
+1: => (produce Solid)
+1: Air => (consume Solid)
+
+1: Solid => (Gravity at-least (0.5 Unit)) (Gravity at-most (0.5 Unit))
+1: Solid => (Floaty at-most (0 Unit))
+1: (not Solid) => (Gravity at-most (0 Unit))
+1: (not Solid) => (Floaty at-least (0.1 Unit))
+
+1: Gravity => (produce Downwards)
+1: Floaty => (produce (0.2 Upwards))

@@ -8,7 +8,7 @@ use crate::chemistry::{
 use nom::{
     branch::alt,
     bytes::complete::tag,
-    character::complete::{char, multispace0, newline, space0},
+    character::complete::{char, line_ending, multispace0, space0},
     combinator::{complete, cut, eof, map, map_res, value},
     error::{convert_error, FromExternalError, ParseError},
     multi::{many0, many1},
@@ -16,6 +16,7 @@ use nom::{
     sequence::{delimited, preceded, terminated},
     Err, IResult,
 };
+use simple_error::SimpleError;
 use std::fmt::{self, Debug, Display, Formatter};
 
 #[derive(Clone)]
@@ -240,20 +241,20 @@ fn rule_set<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
     many0(delimited(
         multispace0,
         rule,
-        preceded(space0, alt((value((), newline), value((), eof)))),
+        preceded(space0, alt((value((), line_ending), value((), eof)))),
     ))(input)
 }
 
 fn rules_file<'a, E: ParseError<&'a str> + FromExternalError<&'a str, String>>(
     input: &'a str,
 ) -> IResult<&str, Vec<Rule>, E> {
-    terminated(rule_set, eof)(input)
+    terminated(rule_set, preceded(multispace0, eof))(input)
 }
 
-pub(crate) fn parse_rules_file(input: &str) -> Result<Vec<Rule>, String> {
+pub(crate) fn parse_rules_file(input: &str) -> Result<Vec<Rule>, SimpleError> {
     match complete(rules_file)(input) {
         Ok((_, rules)) => Ok(rules),
-        Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(convert_error(input, e)),
+        Err(Err::Error(e)) | Err(Err::Failure(e)) => Err(SimpleError::new(convert_error(input, e))),
         Err(Err::Incomplete(_)) => unreachable!(),
     }
 }
@@ -452,7 +453,8 @@ mod tests {
         let actual_rules_file = "1: Flammable => (produce Burning)
 0.1: Burning area => (share Burning)
 
-0.1: => (consume Burning)";
+0.1: => (consume Burning)
+";
 
         assert_eq!(
             expected_rules,

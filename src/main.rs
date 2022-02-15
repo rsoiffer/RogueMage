@@ -1,15 +1,14 @@
-#[macro_use]
-extern crate lazy_static;
-
 mod blocks;
 mod chemistry;
 mod math_utils;
 mod parser;
+mod rules_asset;
 
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::*;
 use blocks::*;
 use chemistry::*;
+use rules_asset::{RulesAsset, RulesAssetLoader};
 
 fn main() {
     App::new()
@@ -21,11 +20,14 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .init_resource::<BlockTextureAtlasResource>()
+        .init_resource::<NaturalRules>()
         .insert_resource(ClearColor(Color::rgb(0.5, 0.7, 1.0)))
         .insert_resource(RapierConfiguration {
             gravity: Vector::y() * -1000.0,
             ..Default::default()
         })
+        .add_asset::<RulesAsset>()
+        .init_asset_loader::<RulesAssetLoader>()
         .add_startup_system(setup_block_atlas.label("setup block atlas"))
         .add_startup_system(setup.after("setup block atlas"))
         .add_system(chemistry_system)
@@ -39,7 +41,12 @@ fn setup(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     block_texture_atlas_resource: Res<BlockTextureAtlasResource>,
+    mut natural_rules: ResMut<NaturalRules>,
 ) {
+    asset_server.watch_for_changes().unwrap();
+
+    natural_rules.0 = asset_server.load("natural.rules");
+
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 
     let mut block_spawner = BlockSpawner {
