@@ -51,6 +51,10 @@ impl Block {
         self.stored_properties.contains(property)
     }
 
+    fn get_any(&self, property: BlockProperties) -> bool {
+        self.stored_properties.intersects(property)
+    }
+
     fn set(&mut self, property: BlockProperties, value: bool) {
         self.stored_properties.set(property, value)
     }
@@ -146,6 +150,14 @@ lazy_static! {
             name: "Smoke",
             color1: Color::rgba(0.1, 0.1, 0.1, 0.5),
             color2: Color::rgba(0.2, 0.2, 0.2, 0.2),
+            density: 0.05,
+            physics: BlockPhysics::Liquid,
+            powder_stability: 0.0,
+        },
+        BlockData {
+            name: "Steam",
+            color1: Color::rgba(1.0, 1.0, 1.0, 0.3),
+            color2: Color::rgba(1.0, 1.0, 1.0, 0.1),
             density: 0.05,
             physics: BlockPhysics::Liquid,
             powder_stability: 0.0,
@@ -285,7 +297,6 @@ impl UpdateRule for PowderUpdateRule {
             }
 
             block.set(BlockProperties::MOVED_THIS_STEP, true);
-            //block.set(CellStoredProperties::POWDER_STABLE, false);
             if block2.id != 0 {
                 block2.set(BlockProperties::MOVED_THIS_STEP, true);
             }
@@ -390,6 +401,186 @@ impl UpdateRule for BurnUpdateRule {
     }
 }
 
+#[derive(Default)]
+struct Reagent {
+    dist: i32,
+    id1: Option<u16>,
+    props1: Option<BlockProperties>,
+    neg_props1: Option<BlockProperties>,
+    id2: Option<u16>,
+    props2: Option<BlockProperties>,
+    neg_props2: Option<BlockProperties>,
+}
+
+impl Reagent {
+    fn new(dist: i32) -> Reagent {
+        Reagent {
+            dist,
+            ..Default::default()
+        }
+    }
+
+    fn select_block(mut self, id: u16) -> Reagent {
+        self.id1 = Some(id);
+        self
+    }
+
+    fn select_prop(mut self, property: BlockProperties, value: bool) -> Reagent {
+        if value {
+            self.props1 = Some(property);
+        } else {
+            self.neg_props1 = Some(property)
+        }
+        self
+    }
+
+    fn transform(mut self, id: u16) -> Reagent {
+        self.id2 = Some(id);
+        self
+    }
+
+    fn set_prop(mut self, property: BlockProperties, value: bool) -> Reagent {
+        if value {
+            self.props2 = Some(property);
+        } else {
+            self.neg_props2 = Some(property)
+        }
+        self
+    }
+
+    fn matches(&self, block: Block) -> bool {
+        match self.id1 {
+            Some(id1) => {
+                if id1 != block.id {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        match self.props1 {
+            Some(props1) => {
+                if !block.get(props1) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        match self.neg_props1 {
+            Some(neg_props1) => {
+                if block.get_any(neg_props1) {
+                    return false;
+                }
+            }
+            _ => {}
+        }
+        return true;
+    }
+
+    fn update(&self, block: &mut Block) {
+        match self.id2 {
+            Some(id2) => {
+                block.id = id2;
+                block.color_seed = rand::random();
+            }
+            _ => {}
+        }
+        match self.props2 {
+            Some(props2) => {
+                block.set(props2, true);
+            }
+            _ => {}
+        }
+        match self.neg_props2 {
+            Some(neg_props2) => {
+                block.set(neg_props2, false);
+            }
+            _ => {}
+        }
+    }
+}
+
+struct ChemicalUpdateRule {
+    probability: f32,
+    reagents: Vec<Reagent>,
+}
+
+impl UpdateRule for &ChemicalUpdateRule {
+    fn update(&self, grid: &mut BlockGrid, x: usize, y: usize) {
+        if rand::random::<f32>() < self.probability {
+            let mut selections = vec![];
+            'a: for reagent in &self.reagents {
+                let range = -reagent.dist..reagent.dist + 1;
+                for (x2, y2) in grid.neighbors(x, y, range.clone(), range) {
+                    let block2 = grid.get(x2, y2);
+                    if reagent.matches(block2) && !selections.contains(&(x2, y2)) {
+                        selections.push((x2, y2));
+                        continue 'a;
+                    }
+                }
+                return;
+            }
+            for ((x, y), reagent) in Iterator::zip(selections.into_iter(), self.reagents.iter()) {
+                let mut block = grid.get(x, y);
+                reagent.update(&mut block);
+                grid.set(x, y, block);
+            }
+        }
+    }
+}
+
+lazy_static! {
+    static ref FIRE_RULES: Vec<ChemicalUpdateRule> = vec![
+        ChemicalUpdateRule {
+            probability: 0.05,
+            reagents: vec![Reagent::new(0).select_block(6).transform(0)],
+        },
+        ChemicalUpdateRule {
+            probability: 0.1,
+            reagents: vec![
+                Reagent::new(0).select_block(6),
+                Reagent::new(2)
+                    .select_block(5)
+                    .set_prop(BlockProperties::BURNING, true)
+            ],
+        },
+        ChemicalUpdateRule {
+            probability: 0.01,
+            reagents: vec![Reagent::new(0)
+                .select_prop(BlockProperties::BURNING, true)
+                .set_prop(BlockProperties::BURNING, false)],
+        },
+        ChemicalUpdateRule {
+            probability: 0.2,
+            reagents: vec![
+                Reagent::new(0).select_prop(BlockProperties::BURNING, true),
+                Reagent::new(1).select_block(0).transform(6)
+            ],
+        },
+        ChemicalUpdateRule {
+            probability: 0.005,
+            reagents: vec![Reagent::new(0)
+                .select_prop(BlockProperties::BURNING, true)
+                .transform(7)
+                .set_prop(BlockProperties::BURNING, false)],
+        },
+        ChemicalUpdateRule {
+            probability: 0.002,
+            reagents: vec![Reagent::new(0).select_block(7).transform(0)],
+        },
+        ChemicalUpdateRule {
+            probability: 1.0,
+            reagents: vec![
+                Reagent::new(0).select_block(6).transform(0),
+                Reagent::new(1).select_block(2).transform(8),
+            ],
+        },
+        ChemicalUpdateRule {
+            probability: 0.002,
+            reagents: vec![Reagent::new(0).select_block(8).transform(2)],
+        },
+    ];
+}
+
 #[derive(Component)]
 pub(crate) struct BlockSprite {
     x: usize,
@@ -405,13 +596,16 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, asset_server: Res<
     block_grid.set_range(65..70, 0..5, 6);
     commands.insert_resource(block_grid);
 
-    let update_rules: Vec<Box<dyn UpdateRule>> = vec![
+    let mut update_rules: Vec<Box<dyn UpdateRule>> = vec![
         Box::new(ResetUpdateRule {}),
         Box::new(PowderUpdateRule {}),
         Box::new(LiquidUpdateRule {}),
-        Box::new(FireUpdateRule {}),
-        Box::new(BurnUpdateRule {}),
+        // Box::new(FireUpdateRule {}),
+        // Box::new(BurnUpdateRule {}),
     ];
+    for r in FIRE_RULES.iter() {
+        update_rules.push(Box::new(r));
+    }
     commands.insert_resource(UpdateRules { update_rules });
 
     for x in 0..GRID_SIZE {
