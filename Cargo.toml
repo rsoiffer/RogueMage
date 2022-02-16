@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.53"
-bevy = "0.6"
+bevy = { version = "0.6", features = ["trace", "trace_chrome"] }
 bevy_rapier2d = "0.12.1"
 nom = "7.1.0"
 rand = "0.8"

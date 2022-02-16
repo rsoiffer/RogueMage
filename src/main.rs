@@ -5,7 +5,10 @@ mod math_utils;
 mod parser;
 mod rules_asset;
 
-use bevy::prelude::*;
+use bevy::{
+    diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
+    prelude::*,
+};
 use bevy_rapier2d::prelude::*;
 use blocks::*;
 use cells::*;
@@ -20,10 +23,12 @@ fn main() {
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
+        .add_plugin(LogDiagnosticsPlugin::default())
+        .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .init_resource::<BlockTextureAtlasResource>()
         .init_resource::<NaturalRules>()
-        .insert_resource(ClearColor(Color::rgb(0.5, 0.7, 1.0)))
+        .insert_resource(ClearColor(Color::rgb(0.5, 0.5, 0.5)))
         .insert_resource(RapierConfiguration {
             gravity: Vector::y() * -1000.0,
             ..Default::default()

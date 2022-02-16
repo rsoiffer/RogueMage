@@ -1,3 +1,4 @@
 /target
 .idea
 RogueMage.iml
+trace-*.json
