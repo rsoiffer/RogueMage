@@ -1,28 +1,34 @@
 use bevy::{
     math::Vec3,
-    prelude::{AssetServer, Color, Commands, Component, Query, Res, ResMut, Transform, With},
+    prelude::{AssetServer, Color, Commands, Component, Query, Res, ResMut, Transform},
     sprite::{Sprite, SpriteBundle},
 };
 use bitflags::bitflags;
 use lazy_static::lazy_static;
 use rand::seq::SliceRandom;
-use rand::Rng;
 
 bitflags! {
     #[derive(Default)]
-    struct CellStoredProperties: u32 {
+    struct BlockProperties: u32 {
+        /// Has this block already moved this step
         const MOVED_THIS_STEP = 1 << 0;
+        /// Has this block settled into a stable state - can only be true for powders
         const POWDER_STABLE = 1 << 1;
+        /// Is this block currently on fire
         const BURNING = 1 << 2;
     }
 }
 
 #[derive(Clone, Copy, Debug)]
 struct Block {
+    /// The index into the block definitions array
     id: u16,
+    /// Used to vary colors among blocks of the same type
     color_seed: u8,
+    /// Reserved for future use
     damage: u8,
-    stored_properties: CellStoredProperties,
+    /// The stored properties, all boolean-valued
+    stored_properties: BlockProperties,
 }
 
 impl Default for Block {
@@ -41,30 +47,40 @@ impl Block {
         ALL_BLOCK_DATA.get(self.id as usize).unwrap()
     }
 
-    fn get(&self, property: CellStoredProperties) -> bool {
+    fn get(&self, property: BlockProperties) -> bool {
         self.stored_properties.contains(property)
     }
 
-    fn set(&mut self, property: CellStoredProperties, value: bool) {
+    fn set(&mut self, property: BlockProperties, value: bool) {
         self.stored_properties.set(property, value)
     }
 }
 
 #[derive(Debug, PartialEq)]
 enum BlockPhysics {
+    /// Doesn't move, can be pushed around
     None,
-    Powder,
-    Liquid,
+    /// Doesn't move, can't be pushed around
     Solid,
+    /// Forms into piles, has friction
+    Powder,
+    /// Frictionless liquids and gasses
+    Liquid,
 }
 
 #[derive(Debug)]
 pub(crate) struct BlockData {
+    /// Internal block name
     name: &'static str,
+    /// First color extreme
     color1: Color,
+    /// Second color extreme
     color2: Color,
+    /// Mass of a single block
     density: f32,
+    /// Physics of this block
     physics: BlockPhysics,
+    /// Stability of this powder - only makes sense for powders
     powder_stability: f32,
 }
 
@@ -137,10 +153,13 @@ lazy_static! {
     ];
 }
 
+/// The size of the whole grid of blocks
 const GRID_SIZE: usize = 128;
 
 pub(crate) struct BlockGrid {
+    /// The 2d array of blocks
     grid: [[Block; GRID_SIZE]; GRID_SIZE],
+    /// If true, simulate right-to-left
     flip_sim_dir: bool,
 }
 
@@ -232,7 +251,7 @@ struct ResetUpdateRule {}
 impl UpdateRule for ResetUpdateRule {
     fn update(&self, grid: &mut BlockGrid, x: usize, y: usize) {
         let mut block = grid.get(x, y);
-        block.set(CellStoredProperties::MOVED_THIS_STEP, false);
+        block.set(BlockProperties::MOVED_THIS_STEP, false);
         grid.set(x, y, block);
     }
 }
@@ -242,34 +261,33 @@ impl UpdateRule for PowderUpdateRule {
     fn update(&self, grid: &mut BlockGrid, x: usize, y: usize) {
         let mut block = grid.get(x, y);
         let block_data = block.data();
-        if block.get(CellStoredProperties::MOVED_THIS_STEP)
-            || block_data.physics != BlockPhysics::Powder
+        if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Powder
         {
             return;
         }
 
         if rand::random::<f32>() < block_data.powder_stability {
-            block.set(CellStoredProperties::POWDER_STABLE, true);
+            block.set(BlockProperties::POWDER_STABLE, true);
             grid.set(x, y, block);
         }
         let mut to_check = grid.neighbors(x, y, [0], [-1]);
-        if !block.get(CellStoredProperties::POWDER_STABLE) {
+        if !block.get(BlockProperties::POWDER_STABLE) {
             to_check.extend(grid.neighbors(x, y, [-1, 1], [-1]));
             to_check.extend(grid.neighbors(x, y, [-1, 1], [0]));
         }
         for (x2, y2) in to_check {
             let mut block2 = grid.get(x2, y2);
             let block2_data = block2.data();
-            if block2.get(CellStoredProperties::MOVED_THIS_STEP)
+            if block2.get(BlockProperties::MOVED_THIS_STEP)
                 || block2_data.density >= block_data.density
             {
                 continue;
             }
 
-            block.set(CellStoredProperties::MOVED_THIS_STEP, true);
+            block.set(BlockProperties::MOVED_THIS_STEP, true);
             //block.set(CellStoredProperties::POWDER_STABLE, false);
             if block2.id != 0 {
-                block2.set(CellStoredProperties::MOVED_THIS_STEP, true);
+                block2.set(BlockProperties::MOVED_THIS_STEP, true);
             }
             grid.set(x, y, block2);
             grid.set(x2, y2, block);
@@ -277,7 +295,7 @@ impl UpdateRule for PowderUpdateRule {
             for (x3, y3) in grid.neighbors(x, y, [-1, 0, 1], [-1, 0, 1]) {
                 let mut block3 = grid.get(x3, y3);
                 if block3.data().physics == BlockPhysics::Powder {
-                    block3.set(CellStoredProperties::POWDER_STABLE, false);
+                    block3.set(BlockProperties::POWDER_STABLE, false);
                     grid.set(x3, y3, block3);
                 }
             }
@@ -291,8 +309,7 @@ impl UpdateRule for LiquidUpdateRule {
     fn update(&self, grid: &mut BlockGrid, x: usize, y: usize) {
         let mut block = grid.get(x, y);
         let block_data = block.data();
-        if block.get(CellStoredProperties::MOVED_THIS_STEP)
-            || block_data.physics != BlockPhysics::Liquid
+        if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Liquid
         {
             return;
         }
@@ -303,15 +320,15 @@ impl UpdateRule for LiquidUpdateRule {
         for (x2, y2) in to_check {
             let mut block2 = grid.get(x2, y2);
             let block2_data = block2.data();
-            if block2.get(CellStoredProperties::MOVED_THIS_STEP)
+            if block2.get(BlockProperties::MOVED_THIS_STEP)
                 || down as f32 * (block2_data.density - block_data.density) <= 0.0
             {
                 continue;
             }
 
-            block.set(CellStoredProperties::MOVED_THIS_STEP, true);
+            block.set(BlockProperties::MOVED_THIS_STEP, true);
             if block2.id != 0 {
-                block2.set(CellStoredProperties::MOVED_THIS_STEP, true);
+                block2.set(BlockProperties::MOVED_THIS_STEP, true);
             }
             grid.set(x, y, block2);
             grid.set(x2, y2, block);
@@ -337,7 +354,7 @@ impl UpdateRule for FireUpdateRule {
                 continue;
             }
             if rand::random::<f32>() < 0.01 {
-                block2.set(CellStoredProperties::BURNING, true);
+                block2.set(BlockProperties::BURNING, true);
                 grid.set(x2, y2, block2);
             }
         }
@@ -348,15 +365,15 @@ struct BurnUpdateRule {}
 impl UpdateRule for BurnUpdateRule {
     fn update(&self, grid: &mut BlockGrid, x: usize, y: usize) {
         let mut block = grid.get(x, y);
-        if !block.get(CellStoredProperties::BURNING) {
+        if !block.get(BlockProperties::BURNING) {
             return;
         }
         if rand::random::<f32>() < 0.01 {
-            block.set(CellStoredProperties::BURNING, false);
+            block.set(BlockProperties::BURNING, false);
             grid.set(x, y, block);
         } else if rand::random::<f32>() < 0.005 {
             block.id = 7;
-            block.set(CellStoredProperties::BURNING, false);
+            block.set(BlockProperties::BURNING, false);
             grid.set(x, y, block);
         }
         for (x2, y2) in grid.neighbors(x, y, -1..2, -1..2) {
@@ -379,6 +396,7 @@ pub(crate) struct BlockSprite {
     y: usize,
 }
 
+/// Initialize the simulation and its graphics
 pub(crate) fn system_setup_block_grid(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut block_grid = BlockGrid::default();
     block_grid.set_range(115..120, 5..125, 3);
@@ -414,6 +432,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, asset_server: Res<
     }
 }
 
+/// Step the simulation, update the graphics
 pub(crate) fn system_update_block_grid(
     mut block_grid: ResMut<BlockGrid>,
     update_rules: Res<UpdateRules>,
@@ -425,19 +444,11 @@ pub(crate) fn system_update_block_grid(
         let x = block.color_seed as f32 / 255.0;
         sprite.color = block.data().color1 * x + block.data().color2 * (1.0 - x);
 
-        if block.get(CellStoredProperties::BURNING) {
+        // Draw all burning blocks as fire
+        if block.get(BlockProperties::BURNING) {
             let x = rand::random::<f32>();
             let fire_data = ALL_BLOCK_DATA.get(6).unwrap();
             sprite.color = fire_data.color1 * x + fire_data.color2 * (1.0 - x);
         }
-
-        // if block.data().physics == BlockPhysics::Powder
-        //     && !block.get(CellStoredProperties::POWDER_STABLE)
-        // {
-        //     sprite.color = sprite.color * 0.5 + Color::RED * 0.5;
-        // }
-        // if block.get(CellStoredProperties::MOVED_THIS_STEP) {
-        //     sprite.color = sprite.color * 0.5 + Color::RED * 0.5;
-        // }
     }
 }
