@@ -440,7 +440,6 @@ dependencies = [
  "bevy_app",
  "bevy_utils",
  "console_error_panic_hook",
- "tracing-chrome",
  "tracing-log",
  "tracing-subscriber",
  "tracing-wasm",
@@ -1745,12 +1744,6 @@ checksum = "a38fc24e30fd564ce974c02bf1d337caddff65be6cc4735a1f7eab22a7440f04"
 dependencies = [
  "wasm-bindgen",
 ]
-
-[[package]]
-name = "json"
-version = "0.12.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "078e285eafdfb6c4b434e0d31e8cfcb5115b651496faca5749b88fafd4f23bfd"
 
 [[package]]
 name = "khronos-egl"
@@ -3072,17 +3065,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
-]
-
-[[package]]
-name = "tracing-chrome"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7fa213f0cfbe503fb51065f2663726b093dac7cda39401eac060d0ebd4b8415c"
-dependencies = [
- "json",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

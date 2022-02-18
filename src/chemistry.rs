@@ -1,4 +1,5 @@
 use self::{Property::*, Selector::*};
+use crate::blocks::*;
 use crate::{math_utils::*, rules_asset::RulesAsset};
 use bevy::prelude::*;
 use std::collections::HashMap;
@@ -31,6 +32,8 @@ pub(crate) enum Property {
     Gravity,
     Floaty,
     Solid,
+    Material(u16),
+    BlockProperty(BlockProperties),
 }
 
 impl Property {
