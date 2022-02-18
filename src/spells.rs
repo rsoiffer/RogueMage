@@ -97,6 +97,9 @@ impl SpellSelector {
             Bind(selectors) => {
                 let mut new_targets = vec![SpellTarget::new(target)];
                 for selector in selectors {
+                    if new_targets.len() == 0 {
+                        break;
+                    }
                     new_targets = new_targets
                         .into_iter()
                         .flat_map(|spell_target| selector.select_spell(info, spell_target))
@@ -226,8 +229,8 @@ lazy_static! {
             rate: 0.05,
             spell: basic(
                 [
-                    Is(Material(*AIR)),
-                    Is(BlockProperty(BlockProperties::BURNING))
+                    Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Material(*AIR))
                 ],
                 [Receive(BlockProperty(BlockProperties::BURNING))]
             )
@@ -237,8 +240,8 @@ lazy_static! {
             rate: 0.2,
             spell: basic(
                 [
-                    Is(Material(*AIR)),
                     Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Material(*AIR)),
                     Adjacent,
                     Is(Material(*COAL)),
                     not(Is(BlockProperty(BlockProperties::BURNING)))

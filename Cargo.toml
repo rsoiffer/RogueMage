@@ -17,7 +17,7 @@ lazy_static = "1.4"
 num = "0.4"
 
 [profile.dev]
-opt-level = 1
+opt-level = 3
 
 [profile.dev.package."*"]
 opt-level = 3

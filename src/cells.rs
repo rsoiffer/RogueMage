@@ -244,18 +244,9 @@ impl UpdateRule {
         // let mut block = grid.get(x, y).unwrap();
         // let block_data = block.data();
 
-        let mut results = spell_rule
+        let results = spell_rule
             .spell
             .cast(&WorldInfo { grid }, SpellTarget::new(Target::Block(x, y)));
-
-        // Filter out invalid results
-        results.retain(|result| match result.target.target {
-            Target::Block(x2, y2) => match grid.get(x2, y2) {
-                Some(_) => true,
-                None => false,
-            },
-            _ => false,
-        });
 
         // Apply effects
         for result in results {
@@ -263,7 +254,10 @@ impl UpdateRule {
                 continue;
             }
             let (x2, y2, mut block2) = match result.target.target {
-                Target::Block(x2, y2) => (x2, y2, grid.get(x2, y2).unwrap()),
+                Target::Block(x2, y2) => match grid.get(x2, y2) {
+                    Some(block) => (x2, y2, block),
+                    _ => continue,
+                },
                 _ => todo!(),
             };
             for effect in result.effects {
