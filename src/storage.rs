@@ -5,6 +5,7 @@ use std::{
     hash::Hash,
     sync::{Mutex, MutexGuard},
 };
+use topological_sort::TopologicalSort;
 
 #[derive(Debug)]
 pub(crate) struct Digraph<N, E> {
@@ -135,6 +136,18 @@ impl ReactiveStorage {
         match self.selector {
             Bind(_, _) => None,
             Is(_) => None,
+            Adjacent => {
+                if return_changes {
+                    None
+                } else {
+                    match source {
+                        Object::Block(x, y) => Some(Box::new((-1..2).flat_map(move |x2| {
+                            (-1..2).map(move |y2| (Object::Block(x + x2, y + y2), 1.0))
+                        }))),
+                        _ => None,
+                    }
+                }
+            }
             _ => todo!(),
         }
     }
@@ -220,13 +233,25 @@ impl StorageManager {
     }
 
     pub(crate) fn recompute_all_caches(&mut self) {
-        // TODO - topological sort
+        let mut toposort = TopologicalSort::<SpellSelector>::new();
         for (selector, storage) in self.storages.iter() {
-            println!("Recomputing cache for {:?}", selector);
-            storage.lock().unwrap().recompute_cache(self);
+            toposort.insert(selector.clone());
+            for parent in storage.lock().unwrap().parents() {
+                toposort.add_dependency(parent, selector.clone());
+            }
         }
-        for (_, storage) in self.storages.iter() {
-            storage.lock().unwrap().storage.clear_changes();
+        let toposort = toposort.collect::<Vec<_>>();
+
+        // println!("Recomputing all caches...");
+        // for selector in toposort.iter() {
+        //     println!("Recomputing cache for selector {:?}", selector);
+        // }
+
+        for selector in toposort.iter() {
+            self.get(selector).recompute_cache(self);
+        }
+        for selector in toposort.iter() {
+            self.get(selector).storage.clear_changes();
         }
     }
 }

@@ -46,25 +46,25 @@ lazy_static! {
     pub(crate) static ref NATURAL_RULES: Vec<SpellRule> = vec![
         SpellRule {
             name: "Fire disappears over time",
-            rate: 10.05,
+            rate: 0.005,
             selector: bind([
                 Is(BlockProperty(BlockProperties::BURNING)),
                 Is(Material(*AIR))
             ]),
             effects: vec![Receive(BlockProperty(BlockProperties::BURNING))],
         },
-        // SpellRule {
-        //     name: "Fire makes coal start burning",
-        //     rate: 0.2,
-        //     selector: bind([
-        //         Is(BlockProperty(BlockProperties::BURNING)),
-        //         Is(Material(*AIR)),
-        //         Adjacent,
-        //         Is(Material(*COAL)),
-        //         // not(Is(BlockProperty(BlockProperties::BURNING)))
-        //     ]),
-        //     effects: vec![Send(BlockProperty(BlockProperties::BURNING))],
-        // },
+        SpellRule {
+            name: "Fire makes coal start burning",
+            rate: 0.2,
+            selector: bind([
+                Is(BlockProperty(BlockProperties::BURNING)),
+                Is(Material(*AIR)),
+                Adjacent,
+                Is(Material(*COAL)),
+                // not(Is(BlockProperty(BlockProperties::BURNING)))
+            ]),
+            effects: vec![Send(BlockProperty(BlockProperties::BURNING))],
+        },
         // SpellRule {
         //     name: "Coal burns out over time",
         //     rate: 0.01,

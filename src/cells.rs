@@ -3,6 +3,7 @@ use crate::chemistry::Property::*;
 use crate::chemistry::*;
 use crate::spells::*;
 use crate::storage::*;
+use bevy::prelude::Color;
 use bevy::{
     math::Vec3,
     prelude::{info_span, Commands, Component, Query, ResMut, Transform},
@@ -28,18 +29,7 @@ where
 fn run_natural_rule(storage: &mut StorageManager, spell: &SpellRule) {
     let storage1 = storage.get(&spell.selector);
     let targets = storage1.storage.digraph.entries();
-    println!("Running spell {}", spell.name);
-    println!("Spell selector: {:?}", spell.selector);
-    println!("Spell selector digraph: {:?}", storage1.storage.digraph);
-    println!(
-        "Burning digraph: {:?}",
-        storage
-            .get(&SpellSelector::Is(BlockProperty(BlockProperties::BURNING)))
-            .storage
-            .digraph
-    );
     for (&source, &target, &connection) in targets {
-        println!("Applying spell {} to target {:?}", spell.name, target);
         let rate = spell.rate * connection;
         for effect in &spell.effects {
             match effect {
@@ -78,7 +68,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands) {
     // block_grid.set_range(65..70, 0..5, *FIRE);
     set_range(
         &mut storage,
-        65..70,
+        35..70,
         0..5,
         BlockProperty(BlockProperties::BURNING),
     );
@@ -132,6 +122,19 @@ pub(crate) fn system_update_block_grid(
     for (mut sprite, bs) in query.iter_mut() {
         // let block = block_grid.get(bs.x, bs.y).unwrap();
         // sprite.color = block.color();
+        sprite.color = Color::WHITE;
+
+        if storage
+            .get(&SpellSelector::Is(Material(*COAL)))
+            .storage
+            .digraph
+            .get(&Object::Block(bs.x, bs.y), &Object::Block(bs.x, bs.y))
+            > 0.5
+        {
+            let x = rand::random::<f32>();
+            let coal_data = ALL_BLOCK_DATA.get(*COAL as usize).unwrap();
+            sprite.color = coal_data.color1 * x + coal_data.color2 * (1.0 - x);
+        }
 
         // Draw all burning blocks as fire
         if storage
