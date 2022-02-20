@@ -5,6 +5,7 @@ mod math_utils;
 mod parser;
 mod rules_asset;
 mod spells;
+mod storage;
 
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},

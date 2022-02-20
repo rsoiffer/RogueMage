@@ -7,121 +7,13 @@ use lazy_static::lazy_static;
 use Spell::*;
 use SpellEffect::*;
 use SpellSelector::*;
-use Target::*;
 
-pub(crate) struct WorldInfo<'a> {
-    pub(crate) grid: &'a BlockGrid,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Target {
-    Block(i32, i32),
-    Entity(Entity),
-    NewSummon,
-}
-
-impl Target {
-    fn adjacent_map<A, F>(&self, f: F) -> Vec<A>
-    where
-        F: Fn(Target) -> A,
-    {
-        let mut targets = vec![];
-        match self {
-            Block(x, y) => {
-                for x2 in -1..2 {
-                    for y2 in -1..2 {
-                        if x2 != 0 || y2 != 0 {
-                            targets.push(f(Block(x + x2, y + y2)));
-                        }
-                    }
-                }
-            }
-            _ => {}
-        }
-        targets
-    }
-
-    fn get(self, info: &WorldInfo, property: Property) -> f32 {
-        match self {
-            Block(x, y) => match info.grid.get(x, y) {
-                Some(block) => block.get_prop(property),
-                None => 0.0,
-            },
-            _ => todo!(),
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug)]
-pub(crate) struct SpellTarget {
-    pub(crate) target: Target,
-    pub(crate) connection: f32,
-}
-
-impl SpellTarget {
-    pub(crate) fn new(target: Target) -> SpellTarget {
-        SpellTarget {
-            target,
-            connection: 1.0,
-        }
-    }
-}
-
-#[derive(Debug)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(crate) enum SpellSelector {
     Adjacent,
     Is(Property),
     Not(Box<SpellSelector>),
-    Bind(Vec<SpellSelector>),
-}
-
-impl SpellSelector {
-    fn select(&self, info: &WorldInfo, target: Target) -> Vec<SpellTarget> {
-        match self {
-            Adjacent => target.adjacent_map(SpellTarget::new),
-            Is(property) => {
-                if target.get(info, *property) == 0.0 {
-                    vec![]
-                } else {
-                    vec![SpellTarget::new(target)]
-                }
-            }
-            Not(selector) => {
-                let other_targets = selector.select(info, target);
-                if other_targets.len() == 0 {
-                    vec![SpellTarget::new(target)]
-                } else {
-                    vec![]
-                }
-            }
-            Bind(selectors) => {
-                let mut new_targets = vec![SpellTarget::new(target)];
-                for selector in selectors {
-                    if new_targets.len() == 0 {
-                        break;
-                    }
-                    new_targets = new_targets
-                        .into_iter()
-                        .flat_map(|spell_target| selector.select_spell(info, spell_target))
-                        .collect()
-                }
-                new_targets
-            }
-        }
-    }
-
-    fn select_spell(
-        &self,
-        info: &WorldInfo,
-        spell_target: SpellTarget,
-    ) -> impl Iterator<Item = SpellTarget> {
-        self.select(info, spell_target.target)
-            .into_iter()
-            .map(move |result| SpellTarget {
-                target: result.target,
-                connection: spell_target.connection * result.connection,
-            })
-    }
+    Bind(Box<SpellSelector>, Box<SpellSelector>),
 }
 
 fn bind<I>(selectors: I) -> SpellSelector
