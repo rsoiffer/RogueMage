@@ -34,9 +34,7 @@ where
 }
 
 fn run_natural_rule(storage: &mut StorageManager, spell: &SpellRule) {
-    // TODO: Avoid the collect.
-    let targets = storage.get_entries(&spell.selector).collect::<Vec<_>>();
-    for (source, target, connection) in targets {
+    storage.for_each_entry(&spell.selector, |(source, target, connection)| {
         let rate = spell.rate * connection;
         for effect in &spell.effects {
             match effect {
@@ -55,7 +53,7 @@ fn run_natural_rule(storage: &mut StorageManager, spell: &SpellRule) {
                 _ => todo!(),
             }
         }
-    }
+    });
 }
 
 #[derive(Component)]
@@ -66,7 +64,7 @@ pub(crate) struct BlockSprite {
 
 /// Initialize the simulation and its graphics
 pub(crate) fn system_setup_block_grid(mut commands: Commands) {
-    let mut storage = StorageManager::default();
+    let mut storage = StorageManager::new();
     set_range(&mut storage, 0..128, 0..128, *AIR);
     set_range(&mut storage, 115..120, 5..125, *SAND);
     set_range(&mut storage, 115..120, 5..125, *SAND);

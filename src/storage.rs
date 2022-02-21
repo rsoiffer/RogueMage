@@ -239,7 +239,6 @@ impl ReactiveStorage {
     }
 }
 
-#[derive(Default)]
 pub(crate) struct StorageManager {
     pub(crate) material: TrackingDigraph<Object, u16>,
     block_properties: HashMap<BlockProperties, Mutex<TrackingDigraph<Object, bool>>>,
@@ -248,33 +247,41 @@ pub(crate) struct StorageManager {
 
 // TODO - fix the unsafe blocks below by adding RefCells
 impl StorageManager {
+    pub(crate) fn new() -> StorageManager {
+        let mut storage_manager = StorageManager {
+            material: Default::default(),
+            block_properties: Default::default(),
+            selectors: Default::default(),
+        };
+
+        for prop in BlockProperties::iter_all() {
+            storage_manager
+                .block_properties
+                .insert(prop, Mutex::new(Default::default()));
+        }
+
+        storage_manager
+    }
+
     fn get(&self, selector: &SpellSelector) -> MutexGuard<ReactiveStorage> {
         self.selectors.get(selector).unwrap().lock().unwrap()
     }
 
-    pub(crate) fn get_entries<'a>(&'a self, selector: &SpellSelector) -> Entries<'a, Object> {
-        // TODO: This is slow.
-        Box::new(
-            self.get(selector)
-                .storage
-                .current
-                .entries()
-                .collect::<Vec<_>>()
-                .into_iter(),
-        )
+    pub(crate) fn for_each_entry(
+        &self,
+        selector: &SpellSelector,
+        f: impl Fn((Object, Object, f32)) -> (),
+    ) {
+        let reactive_storage = self.get(selector);
+        for entry in reactive_storage.storage.current.entries() {
+            f(entry);
+        }
     }
 
     pub(crate) fn get_prop(
-        &mut self,
+        &self,
         property: BlockProperties,
     ) -> MutexGuard<TrackingDigraph<Object, bool>> {
-        match self.block_properties.get(&property) {
-            Some(_) => {}
-            None => {
-                self.block_properties
-                    .insert(property, Mutex::new(Default::default()));
-            }
-        }
         self.block_properties
             .get(&property)
             .unwrap()

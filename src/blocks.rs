@@ -15,6 +15,17 @@ bitflags! {
     }
 }
 
+impl BlockProperties {
+    pub(crate) fn iter_all() -> impl Iterator<Item = BlockProperties> {
+        [
+            BlockProperties::MOVED_THIS_STEP,
+            BlockProperties::POWDER_STABLE,
+            BlockProperties::BURNING,
+        ]
+        .into_iter()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Block {
     /// The index into the block definitions array
