@@ -1,9 +1,9 @@
-use crate::blocks::BlockProperties;
-use crate::sparse_matrices::*;
-use crate::spells::SpellSelector;
-use crate::spells::SpellSelector::*;
+use crate::{
+    blocks::BlockProperties,
+    sparse_matrices::*,
+    spells::SpellSelector::{self, *},
+};
 use bevy::{prelude::Entity, utils::HashMap};
-use std::ops::Add;
 use std::{
     hash::Hash,
     sync::{Mutex, MutexGuard},
@@ -11,7 +11,7 @@ use std::{
 use topological_sort::TopologicalSort;
 
 #[derive(Debug)]
-struct Digraph<N, E> {
+pub(crate) struct Digraph<N, E> {
     map: HashMap<N, HashMap<N, E>>,
 }
 
@@ -96,16 +96,17 @@ impl<N, E> Default for TrackingDigraph<N, E> {
     }
 }
 
-impl<N, E> TrackingDigraph<N, E>
-where
-    N: Eq + Hash,
-{
-    fn clear_previous(&mut self) {
+impl<N, E> TrackingDigraph<N, E> {
+    fn clear_previous(&mut self)
+    where
+        N: Eq + Hash,
+    {
         self.previous.clear()
     }
 
     pub(crate) fn update<F>(&mut self, source: N, target: N, f: F)
     where
+        N: Copy + Eq + Hash,
         E: Copy + Default + PartialEq,
         F: Fn(E) -> E,
     {
@@ -130,17 +131,17 @@ where
     }
 }
 
-impl<'a> TrackingSparseMatrix<'a, Digraph<Object, f32>, Digraph<Object, f32>>
+impl TrackingSparseMatrix<Digraph<Object, f32>, Digraph<Object, f32>>
     for TrackingDigraph<Object, f32>
 {
     type Key = Object;
 
     fn current(&self) -> &Digraph<Object, f32> {
-        self.current()
+        &self.current
     }
 
     fn previous(&self) -> &Digraph<Object, f32> {
-        self.previous()
+        &self.previous
     }
 }
 
@@ -216,12 +217,12 @@ impl ReactiveStorage {
                 let left = storage_manager.get(&left);
                 let right = storage_manager.get(&right);
                 for (source, target, diff) in
-                    mat_mul(diff(&left.storage), right.storage.current).entries()
+                    mat_mul(diff(&left.storage), &right.storage.current).entries()
                 {
                     self.storage.update(source, target, |x| x + diff);
                 }
                 for (source, target, diff) in
-                    mat_mul(left.storage.current, diff(&right.storage)).entries()
+                    mat_mul(&left.storage.current, diff(&right.storage)).entries()
                 {
                     self.storage.update(source, target, |x| x + diff);
                 }
@@ -252,11 +253,19 @@ impl StorageManager {
     }
 
     pub(crate) fn get_entries<'a>(&'a self, selector: &SpellSelector) -> Entries<'a, Object> {
-        self.get(selector).storage.current.entries()
+        // TODO: This is slow.
+        Box::new(
+            self.get(selector)
+                .storage
+                .current
+                .entries()
+                .collect::<Vec<_>>()
+                .into_iter(),
+        )
     }
 
     pub(crate) fn get_prop(
-        &self,
+        &mut self,
         property: BlockProperties,
     ) -> MutexGuard<TrackingDigraph<Object, bool>> {
         match self.block_properties.get(&property) {

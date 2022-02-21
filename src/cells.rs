@@ -1,10 +1,4 @@
-use crate::blocks::*;
-use crate::chemistry::Property::*;
-use crate::chemistry::*;
-use crate::sparse_matrices::*;
-use crate::spells::*;
-use crate::storage::*;
-use bevy::prelude::Color;
+use crate::{blocks::*, chemistry::Property::*, spells::*, storage::*};
 use bevy::{
     math::Vec3,
     prelude::{info_span, Commands, Component, Query, ResMut, Transform},
@@ -40,7 +34,8 @@ where
 }
 
 fn run_natural_rule(storage: &mut StorageManager, spell: &SpellRule) {
-    let targets = storage.get_entries(&spell.selector);
+    // TODO: Avoid the collect.
+    let targets = storage.get_entries(&spell.selector).collect::<Vec<_>>();
     for (source, target, connection) in targets {
         let rate = spell.rate * connection;
         for effect in &spell.effects {
