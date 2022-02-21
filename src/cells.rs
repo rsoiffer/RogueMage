@@ -244,11 +244,13 @@ impl UpdateRule {
         // let mut block = grid.get(x, y).unwrap();
         // let block_data = block.data();
 
-        let results = spell_rule
-            .spell
-            .cast(&WorldInfo { grid }, SpellTarget::new(Target::Block(x, y)));
+        let mut results: Vec<SpellResult> = vec![];
+        spell_rule.spell.cast(
+            &WorldInfo { grid },
+            SpellTarget::new(Target::Block(x, y)),
+            &mut |result| results.push(result),
+        );
 
-        // Apply effects
         for result in results {
             if rand::random::<f32>() > spell_rule.rate {
                 continue;

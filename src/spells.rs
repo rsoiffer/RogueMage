@@ -21,24 +21,19 @@ pub(crate) enum Target {
 }
 
 impl Target {
-    fn adjacent_map<A, F>(&self, f: F) -> Vec<A>
-    where
-        F: Fn(Target) -> A,
-    {
-        let mut targets = vec![];
+    fn for_each_adjacent<F: FnMut(Target)>(&self, mut f: F) {
         match self {
             Block(x, y) => {
                 for x2 in -1..2 {
                     for y2 in -1..2 {
                         if x2 != 0 || y2 != 0 {
-                            targets.push(f(Block(x + x2, y + y2)));
+                            f(Block(x + x2, y + y2))
                         }
                     }
                 }
             }
             _ => {}
         }
-        targets
     }
 
     fn get(self, info: &WorldInfo, property: Property) -> f32 {
@@ -69,58 +64,58 @@ impl SpellTarget {
 
 #[derive(Debug)]
 pub(crate) enum SpellSelector {
+    Identity,
     Adjacent,
     Is(Property),
     Not(Box<SpellSelector>),
-    Bind(Vec<SpellSelector>),
+    Bind(Box<SpellSelector>, Box<SpellSelector>),
 }
 
 impl SpellSelector {
-    fn select(&self, info: &WorldInfo, target: Target) -> Vec<SpellTarget> {
+    fn select(&self, info: &WorldInfo, target: Target, f: &mut dyn FnMut(SpellTarget)) {
         match self {
-            Adjacent => target.adjacent_map(SpellTarget::new),
+            Identity => f(SpellTarget::new(target)),
+            Adjacent => target.for_each_adjacent(|a| f(SpellTarget::new(a))),
             Is(property) => {
-                if target.get(info, *property) == 0.0 {
-                    vec![]
-                } else {
-                    vec![SpellTarget::new(target)]
+                if target.get(info, *property) != 0.0 {
+                    f(SpellTarget::new(target))
                 }
             }
             Not(selector) => {
-                let other_targets = selector.select(info, target);
-                if other_targets.len() == 0 {
-                    vec![SpellTarget::new(target)]
-                } else {
-                    vec![]
+                let mut has_other_targets = false;
+                selector.select(info, target, &mut |_| has_other_targets = true);
+                if !has_other_targets {
+                    f(SpellTarget::new(target))
                 }
             }
-            Bind(selectors) => {
-                let mut new_targets = vec![SpellTarget::new(target)];
-                for selector in selectors {
-                    if new_targets.len() == 0 {
-                        break;
-                    }
-                    new_targets = new_targets
-                        .into_iter()
-                        .flat_map(|spell_target| selector.select_spell(info, spell_target))
-                        .collect()
-                }
-                new_targets
-            }
+            Bind(left, right) => SpellSelector::bind(info, target, left, right, f),
         }
+    }
+
+    fn bind(
+        info: &WorldInfo,
+        target: Target,
+        left: &Box<SpellSelector>,
+        right: &Box<SpellSelector>,
+        f: &mut dyn FnMut(SpellTarget),
+    ) {
+        left.select_spell(info, SpellTarget::new(target), &mut |new_target| {
+            right.select_spell(info, new_target, f)
+        });
     }
 
     fn select_spell(
         &self,
         info: &WorldInfo,
         spell_target: SpellTarget,
-    ) -> impl Iterator<Item = SpellTarget> {
-        self.select(info, spell_target.target)
-            .into_iter()
-            .map(move |result| SpellTarget {
+        f: &mut dyn FnMut(SpellTarget),
+    ) {
+        self.select(info, spell_target.target, &mut |result| {
+            f(SpellTarget {
                 target: result.target,
                 connection: spell_target.connection * result.connection,
             })
+        })
     }
 }
 
@@ -128,7 +123,10 @@ fn bind<I>(selectors: I) -> SpellSelector
 where
     I: IntoIterator<Item = SpellSelector>,
 {
-    Bind(selectors.into_iter().collect::<Vec<_>>())
+    selectors
+        .into_iter()
+        .reduce(|acc, item| Bind(Box::new(acc), Box::new(item)))
+        .unwrap_or(Identity)
 }
 
 fn not(spell: SpellSelector) -> SpellSelector {
@@ -170,33 +168,61 @@ impl Spell {
         &'a self,
         info: &WorldInfo,
         target: SpellTarget,
-    ) -> Vec<SpellResult<'a>> {
+        f: &mut impl FnMut(SpellResult<'a>),
+    ) {
         match self {
-            Effects(effects) => vec![SpellResult { target, effects }],
-            Select(selector, spell) => selector
-                .select_spell(info, target)
-                .flat_map(|target| spell.cast(info, target))
-                .collect(),
+            Effects(effects) => f(SpellResult { target, effects }),
+            Select(selector, spell) => Spell::cast_select(info, target, selector, spell, f),
             Merge(spell1, spell2) => {
-                let mut results1 = spell1.cast(info, target);
-                let mut results2 = spell2.cast(info, target);
-                let connection1 = results1.iter().map(|r| r.target.connection).sum::<f32>();
-                let connection2 = results2.iter().map(|r| r.target.connection).sum::<f32>();
-                let min_connection = f32::min(connection1, connection2);
-                if min_connection < 1e-6 {
-                    vec![]
-                } else {
-                    for r in results1.iter_mut() {
-                        r.target.connection *= min_connection / connection1;
-                    }
-                    for r in results2.iter_mut() {
-                        r.target.connection *= min_connection / connection2;
-                    }
-                    results1.extend(results2);
-                    results1
+                let (mut results1, mut results2) = Spell::merge(info, target, spell1, spell2);
+                for r in results1.drain(..) {
+                    f(r);
+                }
+                for r in results2.drain(..) {
+                    f(r);
                 }
             }
         }
+    }
+
+    fn merge<'a>(
+        info: &WorldInfo,
+        target: SpellTarget,
+        spell1: &'a Box<Spell>,
+        spell2: &'a Box<Spell>,
+    ) -> (Vec<SpellResult<'a>>, Vec<SpellResult<'a>>) {
+        let mut results1 = vec![];
+        let mut results2 = vec![];
+        spell1.cast(info, target, &mut |t| results1.push(t));
+        spell2.cast(info, target, &mut |t| results2.push(t));
+
+        let connection1 = results1.iter().map(|r| r.target.connection).sum::<f32>();
+        let connection2 = results2.iter().map(|r| r.target.connection).sum::<f32>();
+        let min_connection = f32::min(connection1, connection2);
+
+        if min_connection < 1e-6 {
+            (vec![], vec![])
+        } else {
+            for r in results1.iter_mut() {
+                r.target.connection *= min_connection / connection1;
+            }
+
+            for r in results2.iter_mut() {
+                r.target.connection *= min_connection / connection2;
+            }
+
+            (results1, results2)
+        }
+    }
+
+    fn cast_select<'a>(
+        info: &WorldInfo,
+        target: SpellTarget,
+        selector: &SpellSelector,
+        spell: &'a Box<Spell>,
+        f: &mut impl FnMut(SpellResult<'a>),
+    ) {
+        selector.select_spell(info, target, &mut |target| spell.cast(info, target, f))
     }
 }
 
@@ -226,7 +252,7 @@ lazy_static! {
     pub(crate) static ref NATURAL_RULES: Vec<SpellRule> = vec![
         SpellRule {
             name: "Fire disappears over time",
-            rate: 0.05,
+            rate: 0.03,
             spell: basic(
                 [
                     Is(BlockProperty(BlockProperties::BURNING)),
