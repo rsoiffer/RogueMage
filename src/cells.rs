@@ -45,13 +45,15 @@ impl BlockGrid {
     fn set(&mut self, x: i32, y: i32, block: Block) {
         if x >= 0 && x < GRID_SIZE as i32 && y >= 0 && y < GRID_SIZE as i32 {
             let old_block = self.grid[x as usize][y as usize];
-            for p in old_block.iter_properties() {
-                self.properties.entry(p).or_default().remove(&(x, y));
+            if block != old_block {
+                for p in old_block.iter_properties() {
+                    self.properties.entry(p).or_default().remove(&(x, y));
+                }
+                for p in block.iter_properties() {
+                    self.properties.entry(p).or_default().insert((x, y));
+                }
+                self.grid[x as usize][y as usize] = block;
             }
-            for p in block.iter_properties() {
-                self.properties.entry(p).or_default().insert((x, y));
-            }
-            self.grid[x as usize][y as usize] = block;
         }
     }
 

@@ -26,7 +26,7 @@ impl BlockProperties {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Block {
     /// The index into the block definitions array
     id: u16,
