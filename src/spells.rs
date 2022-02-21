@@ -125,7 +125,10 @@ where
 {
     selectors
         .into_iter()
-        .reduce(|acc, item| Bind(Box::new(acc), Box::new(item)))
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .reduce(|acc, item| Bind(Box::new(item), Box::new(acc)))
         .unwrap_or(Identity)
 }
 
