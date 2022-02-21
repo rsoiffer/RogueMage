@@ -244,37 +244,42 @@ impl UpdateRule {
         // let mut block = grid.get(x, y).unwrap();
         // let block_data = block.data();
 
-        let results = spell_rule
-            .spell
-            .cast(&WorldInfo { grid }, SpellTarget::new(Target::Block(x, y)));
+        let grid_raw = grid as *mut BlockGrid;
+        unsafe {
+            let world_info = WorldInfo { grid };
+            let results = spell_rule
+                .spell
+                .cast(&world_info, SpellTarget::new(Target::Block(x, y)))
+                .collect::<Vec<_>>();
 
-        // Apply effects
-        for result in results {
-            if rand::random::<f32>() > spell_rule.rate {
-                continue;
-            }
-            let (x2, y2, mut block2) = match result.target.target {
-                Target::Block(x2, y2) => match grid.get(x2, y2) {
-                    Some(block) => (x2, y2, block),
-                    _ => continue,
-                },
-                _ => todo!(),
-            };
-            for effect in result.effects {
-                match effect {
-                    SpellEffect::Send(Property::Material(id)) => {
-                        block2 = Block::new(*id);
-                    }
-                    SpellEffect::Send(Property::BlockProperty(property)) => {
-                        block2.set(*property, true);
-                    }
-                    SpellEffect::Receive(Property::BlockProperty(property)) => {
-                        block2.set(*property, false);
-                    }
-                    _ => todo!(),
+            // Apply effects
+            for result in results {
+                if rand::random::<f32>() > spell_rule.rate {
+                    continue;
                 }
+                let (x2, y2, mut block2) = match result.target.target {
+                    Target::Block(x2, y2) => match grid.get(x2, y2) {
+                        Some(block) => (x2, y2, block),
+                        _ => continue,
+                    },
+                    _ => todo!(),
+                };
+                for effect in result.effects {
+                    match effect {
+                        SpellEffect::Send(Property::Material(id)) => {
+                            block2 = Block::new(*id);
+                        }
+                        SpellEffect::Send(Property::BlockProperty(property)) => {
+                            block2.set(*property, true);
+                        }
+                        SpellEffect::Receive(Property::BlockProperty(property)) => {
+                            block2.set(*property, false);
+                        }
+                        _ => todo!(),
+                    }
+                }
+                (*grid_raw).set(x2, y2, block2);
             }
-            grid.set(x2, y2, block2);
         }
     }
 }

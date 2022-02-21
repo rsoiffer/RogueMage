@@ -9,6 +9,8 @@ use SpellEffect::*;
 use SpellSelector::*;
 use Target::*;
 
+type BoxIter<'a, A> = Box<dyn Iterator<Item = A> + 'a>;
+
 pub(crate) struct WorldInfo<'a> {
     pub(crate) grid: &'a BlockGrid,
 }
@@ -21,24 +23,23 @@ pub(crate) enum Target {
 }
 
 impl Target {
-    fn adjacent_map<A, F>(&self, f: F) -> Vec<A>
+    fn adjacent_map<'a, A, F>(self, f: &'a F) -> BoxIter<'a, A>
     where
         F: Fn(Target) -> A,
+        A: 'a,
     {
-        let mut targets = vec![];
         match self {
-            Block(x, y) => {
-                for x2 in -1..2 {
-                    for y2 in -1..2 {
-                        if x2 != 0 || y2 != 0 {
-                            targets.push(f(Block(x + x2, y + y2)));
-                        }
+            Block(x, y) => Box::new((-1..2).flat_map(move |x2| {
+                (-1..2).filter_map(move |y2| {
+                    if x2 != 0 || y2 != 0 {
+                        Some(f(Block(x + x2, y + y2)))
+                    } else {
+                        None
                     }
-                }
-            }
-            _ => {}
+                })
+            })),
+            _ => Box::new(vec![].into_iter()),
         }
-        targets
     }
 
     fn get(self, info: &WorldInfo, property: Property) -> f32 {
@@ -76,51 +77,53 @@ pub(crate) enum SpellSelector {
 }
 
 impl SpellSelector {
-    fn select(&self, info: &WorldInfo, target: Target) -> Vec<SpellTarget> {
+    fn select<'a>(&'a self, info: &'a WorldInfo, target: Target) -> BoxIter<'a, SpellTarget> {
         match self {
-            Adjacent => target.adjacent_map(SpellTarget::new),
+            Adjacent => target.adjacent_map(&SpellTarget::new),
             Is(property) => {
                 if target.get(info, *property) == 0.0 {
-                    vec![]
+                    Box::new(vec![].into_iter())
                 } else {
-                    vec![SpellTarget::new(target)]
+                    Box::new(vec![SpellTarget::new(target)].into_iter())
                 }
             }
             Not(selector) => {
-                let other_targets = selector.select(info, target);
+                let other_targets = selector.select(info, target).collect::<Vec<_>>();
                 if other_targets.len() == 0 {
-                    vec![SpellTarget::new(target)]
+                    Box::new(vec![SpellTarget::new(target)].into_iter())
                 } else {
-                    vec![]
+                    Box::new(vec![].into_iter())
                 }
             }
             Bind(selectors) => {
-                let mut new_targets = vec![SpellTarget::new(target)];
+                let mut new_targets: BoxIter<'a, SpellTarget> =
+                    Box::new(vec![SpellTarget::new(target)].into_iter());
                 for selector in selectors {
-                    if new_targets.len() == 0 {
-                        break;
-                    }
-                    new_targets = new_targets
-                        .into_iter()
-                        .flat_map(|spell_target| selector.select_spell(info, spell_target))
-                        .collect()
+                    // if new_targets.len() == 0 {
+                    //     break;
+                    // }
+                    new_targets = Box::new(
+                        new_targets
+                            .flat_map(|spell_target| selector.select_spell(info, spell_target)),
+                    )
                 }
                 new_targets
             }
         }
     }
 
-    fn select_spell(
-        &self,
-        info: &WorldInfo,
+    fn select_spell<'a>(
+        &'a self,
+        info: &'a WorldInfo,
         spell_target: SpellTarget,
-    ) -> impl Iterator<Item = SpellTarget> {
-        self.select(info, spell_target.target)
-            .into_iter()
-            .map(move |result| SpellTarget {
-                target: result.target,
-                connection: spell_target.connection * result.connection,
-            })
+    ) -> BoxIter<'a, SpellTarget> {
+        Box::new(
+            self.select(info, spell_target.target)
+                .map(move |result| SpellTarget {
+                    target: result.target,
+                    connection: spell_target.connection * result.connection,
+                }),
+        )
     }
 }
 
@@ -168,23 +171,24 @@ pub(crate) enum Spell {
 impl Spell {
     pub(crate) fn cast<'a>(
         &'a self,
-        info: &WorldInfo,
+        info: &'a WorldInfo<'a>,
         target: SpellTarget,
-    ) -> Vec<SpellResult<'a>> {
+    ) -> BoxIter<SpellResult<'a>> {
         match self {
-            Effects(effects) => vec![SpellResult { target, effects }],
-            Select(selector, spell) => selector
-                .select_spell(info, target)
-                .flat_map(|target| spell.cast(info, target))
-                .collect(),
+            Effects(effects) => Box::new(vec![SpellResult { target, effects }].into_iter()),
+            Select(selector, spell) => Box::new(
+                selector
+                    .select_spell(info, target)
+                    .flat_map(|target| spell.cast(info, target)),
+            ),
             Merge(spell1, spell2) => {
-                let mut results1 = spell1.cast(info, target);
-                let mut results2 = spell2.cast(info, target);
+                let mut results1 = spell1.cast(info, target).collect::<Vec<_>>();
+                let mut results2 = spell2.cast(info, target).collect::<Vec<_>>();
                 let connection1 = results1.iter().map(|r| r.target.connection).sum::<f32>();
                 let connection2 = results2.iter().map(|r| r.target.connection).sum::<f32>();
                 let min_connection = f32::min(connection1, connection2);
                 if min_connection < 1e-6 {
-                    vec![]
+                    Box::new(vec![].into_iter())
                 } else {
                     for r in results1.iter_mut() {
                         r.target.connection *= min_connection / connection1;
@@ -193,7 +197,7 @@ impl Spell {
                         r.target.connection *= min_connection / connection2;
                     }
                     results1.extend(results2);
-                    results1
+                    Box::new(results1.into_iter())
                 }
             }
         }
