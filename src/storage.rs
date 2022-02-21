@@ -1,6 +1,9 @@
+use crate::blocks::BlockProperties;
+use crate::sparse_matrices::*;
 use crate::spells::SpellSelector;
 use crate::spells::SpellSelector::*;
 use bevy::{prelude::Entity, utils::HashMap};
+use std::ops::Add;
 use std::{
     hash::Hash,
     sync::{Mutex, MutexGuard},
@@ -8,7 +11,7 @@ use std::{
 use topological_sort::TopologicalSort;
 
 #[derive(Debug)]
-pub(crate) struct Digraph<N, E> {
+struct Digraph<N, E> {
     map: HashMap<N, HashMap<N, E>>,
 }
 
@@ -24,25 +27,10 @@ impl<N, E> Digraph<N, E>
 where
     N: Eq + Hash,
 {
-    pub(crate) fn clear(&mut self) {
+    fn clear(&mut self) {
         for inner_map in self.map.values_mut() {
             inner_map.clear();
         }
-    }
-
-    pub(crate) fn entries(&self) -> impl Iterator<Item = (&N, &N, &E)> {
-        self.map.iter().flat_map(|(source, storage2)| {
-            storage2
-                .iter()
-                .map(move |(target, value)| (source, target, value))
-        })
-    }
-
-    pub(crate) fn get(&self, source: &N, target: &N) -> E
-    where
-        E: Copy + Default + PartialEq,
-    {
-        self.get_option(source, target).cloned().unwrap_or_default()
     }
 
     pub(crate) fn get_option(&self, source: &N, target: &N) -> Option<&E> {
@@ -51,23 +39,7 @@ where
             .and_then(|storage2| storage2.get(target))
     }
 
-    pub(crate) fn get_all(&self, source: &N) -> impl Iterator<Item = (&N, &E)> {
-        self.map.get(source).into_iter().flat_map(|x| x.iter())
-    }
-
-    pub(crate) fn set(&mut self, source: N, target: N, value: E)
-    where
-        E: Copy + Default + PartialEq,
-    {
-        let value = if value == E::default() {
-            None
-        } else {
-            Some(value)
-        };
-        self.set_option(source, target, value);
-    }
-
-    pub(crate) fn set_option(&mut self, source: N, target: N, value: Option<E>) -> Option<E> {
+    fn set_option(&mut self, source: N, target: N, value: Option<E>) -> Option<E> {
         match value {
             Some(t) => {
                 let storage2 = self.map.entry(source).or_default();
@@ -81,38 +53,95 @@ where
     }
 }
 
-#[derive(Default)]
-pub(crate) struct TrackingDigraph {
-    pub(crate) digraph: Digraph<Object, f32>,
-    changes: Digraph<Object, f32>,
+impl SparseMatrix for Digraph<Object, f32> {
+    type Key = Object;
+
+    fn entries(&self) -> Entries<Object> {
+        Box::new(self.map.iter().flat_map(|(&source, storage2)| {
+            storage2
+                .iter()
+                .map(move |(&target, &value)| (source, target, value))
+        }))
+    }
+
+    fn row(&self, source: Object) -> Row<Object> {
+        Box::new(
+            self.map
+                .get(&source)
+                .into_iter()
+                .flat_map(|x| x.iter())
+                .map(|(&target, &val)| (target, val)),
+        )
+    }
+
+    fn get(&self, source: Object, target: Object) -> f32 {
+        self.get_option(&source, &target)
+            .cloned()
+            .unwrap_or_default()
+    }
 }
 
-impl TrackingDigraph {
-    pub(crate) fn add(&mut self, source: Object, target: Object, diff: f32) {
-        if f32::abs(diff) > 1e-12 {
-            self.digraph
-                .set(source, target, self.digraph.get(&source, &target) + diff);
-            self.changes
-                .set(source, target, self.changes.get(&source, &target) + diff);
+#[derive(Debug)]
+pub(crate) struct TrackingDigraph<N, E> {
+    pub(crate) current: Digraph<N, E>,
+    previous: Digraph<N, E>,
+}
+
+impl<N, E> Default for TrackingDigraph<N, E> {
+    fn default() -> Self {
+        Self {
+            current: Default::default(),
+            previous: Default::default(),
         }
     }
+}
 
-    fn clear_changes(&mut self) {
-        self.changes.clear()
+impl<N, E> TrackingDigraph<N, E>
+where
+    N: Eq + Hash,
+{
+    fn clear_previous(&mut self) {
+        self.previous.clear()
+    }
+
+    pub(crate) fn update<F>(&mut self, source: N, target: N, f: F)
+    where
+        E: Copy + Default + PartialEq,
+        F: Fn(E) -> E,
+    {
+        let current_val = self
+            .current
+            .get_option(&source, &target)
+            .cloned()
+            .unwrap_or_default();
+        if self.previous.get_option(&source, &target).is_none() {
+            self.previous.set_option(source, target, Some(current_val));
+        }
+        let new_val = f(current_val);
+        self.current.set_option(
+            source,
+            target,
+            if new_val == E::default() {
+                None
+            } else {
+                Some(new_val)
+            },
+        );
     }
 }
 
-fn mul<'a, F>(
-    lhs: &'a Digraph<Object, f32>,
-    rhs: F,
-) -> impl Iterator<Item = (Object, Object, f32)> + 'a
-where
-    F: Fn(Object) -> Box<dyn Iterator<Item = (Object, f32)> + 'a> + 'a,
+impl<'a> TrackingSparseMatrix<'a, Digraph<Object, f32>, Digraph<Object, f32>>
+    for TrackingDigraph<Object, f32>
 {
-    lhs.entries().flat_map(move |(&source, &middle, &value1)| {
-        let iter = rhs(middle);
-        iter.map(move |(target, value2)| (source, target, value1 * value2))
-    })
+    type Key = Object;
+
+    fn current(&self) -> &Digraph<Object, f32> {
+        self.current()
+    }
+
+    fn previous(&self) -> &Digraph<Object, f32> {
+        self.previous()
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -123,48 +152,53 @@ pub(crate) enum Object {
 }
 
 pub(crate) struct ReactiveStorage {
-    pub(crate) selector: SpellSelector,
-    pub(crate) storage: TrackingDigraph,
+    selector: SpellSelector,
+    storage: TrackingDigraph<Object, f32>,
 }
 
 impl ReactiveStorage {
-    fn compute_all(
+    // fn row(&self, source: Object) -> Row {
+    //     self.compute_row(source)
+    //         .unwrap_or_else(|| Box::new(self.storage.row(source)))
+    // }
+
+    // fn row_changes(&self, source: Object) -> Row {
+    //     self.compute_row_changes(source)
+    //         .unwrap_or_else(|| Box::new(self.storage.row_changes(source)))
+    // }
+
+    // fn current(&self) -> M {
+    //     todo!()
+    // }
+
+    // fn previous(&self) -> M {
+    //     todo!()
+    // }
+
+    // fn compute_row(&self, source: Object) -> Option<Row> {
+    //     match self.selector {
+    //         Bind(_, _) => None,
+    //         Is(_) => None,
+    //         Adjacent => match source {
+    //             Object::Block(x, y) => Some(Box::new((-1..2).flat_map(move |x2| {
+    //                 (-1..2).map(move |y2| (Object::Block(x + x2, y + y2), 1.0))
+    //             }))),
+    //             _ => todo!(),
+    //         },
+    //         _ => todo!(),
+    //     }
+    // }
+
+    fn compute_row_changes(
         &self,
         source: Object,
-        return_changes: bool,
     ) -> Option<Box<dyn Iterator<Item = (Object, f32)>>> {
         match self.selector {
             Bind(_, _) => None,
             Is(_) => None,
-            Adjacent => {
-                if return_changes {
-                    None
-                } else {
-                    match source {
-                        Object::Block(x, y) => Some(Box::new((-1..2).flat_map(move |x2| {
-                            (-1..2).map(move |y2| (Object::Block(x + x2, y + y2), 1.0))
-                        }))),
-                        _ => None,
-                    }
-                }
-            }
+            Adjacent => None,
             _ => todo!(),
         }
-    }
-
-    pub(crate) fn get_all<'a>(
-        &'a self,
-        source: Object,
-        return_changes: bool,
-    ) -> Box<dyn Iterator<Item = (Object, f32)> + 'a> {
-        self.compute_all(source, return_changes).unwrap_or_else(|| {
-            let digraph = if return_changes {
-                &self.storage.changes
-            } else {
-                &self.storage.digraph
-            };
-            Box::new(digraph.get_all(&source).map(|(&x, &y)| (x, y)))
-        })
     }
 
     /// Who are my parents?
@@ -182,19 +216,19 @@ impl ReactiveStorage {
                 let left = storage_manager.get(&left);
                 let right = storage_manager.get(&right);
                 for (source, target, diff) in
-                    mul(&left.storage.changes, |middle| right.get_all(middle, false))
+                    mat_mul(diff(&left.storage), right.storage.current).entries()
                 {
-                    self.storage.add(source, target, diff);
+                    self.storage.update(source, target, |x| x + diff);
                 }
                 for (source, target, diff) in
-                    mul(&left.storage.digraph, |middle| right.get_all(middle, true))
+                    mat_mul(left.storage.current, diff(&right.storage)).entries()
                 {
-                    self.storage.add(source, target, diff);
+                    self.storage.update(source, target, |x| x + diff);
                 }
                 for (source, target, diff) in
-                    mul(&left.storage.changes, |middle| right.get_all(middle, true))
+                    mat_mul(diff(&left.storage), diff(&right.storage)).entries()
                 {
-                    self.storage.add(source, target, -diff);
+                    self.storage.update(source, target, |x| x - diff);
                 }
             }
             Is(_) => {}
@@ -206,17 +240,41 @@ impl ReactiveStorage {
 
 #[derive(Default)]
 pub(crate) struct StorageManager {
-    storages: HashMap<SpellSelector, Mutex<ReactiveStorage>>,
+    pub(crate) material: TrackingDigraph<Object, u16>,
+    block_properties: HashMap<BlockProperties, Mutex<TrackingDigraph<Object, bool>>>,
+    selectors: HashMap<SpellSelector, Mutex<ReactiveStorage>>,
 }
 
 // TODO - fix the unsafe blocks below by adding RefCells
 impl StorageManager {
-    pub(crate) fn get(&self, selector: &SpellSelector) -> MutexGuard<ReactiveStorage> {
-        self.storages.get(selector).unwrap().lock().unwrap()
+    fn get(&self, selector: &SpellSelector) -> MutexGuard<ReactiveStorage> {
+        self.selectors.get(selector).unwrap().lock().unwrap()
+    }
+
+    pub(crate) fn get_entries<'a>(&'a self, selector: &SpellSelector) -> Entries<'a, Object> {
+        self.get(selector).storage.current.entries()
+    }
+
+    pub(crate) fn get_prop(
+        &self,
+        property: BlockProperties,
+    ) -> MutexGuard<TrackingDigraph<Object, bool>> {
+        match self.block_properties.get(&property) {
+            Some(_) => {}
+            None => {
+                self.block_properties
+                    .insert(property, Mutex::new(Default::default()));
+            }
+        }
+        self.block_properties
+            .get(&property)
+            .unwrap()
+            .lock()
+            .unwrap()
     }
 
     pub(crate) fn require(&mut self, selector: &SpellSelector) {
-        match self.storages.get(selector) {
+        match self.selectors.get(selector) {
             Some(_) => {}
             None => {
                 let new_storage = ReactiveStorage {
@@ -226,7 +284,7 @@ impl StorageManager {
                 for parent in new_storage.parents() {
                     self.require(&parent);
                 }
-                self.storages
+                self.selectors
                     .insert(selector.clone(), Mutex::new(new_storage));
             }
         }
@@ -234,7 +292,7 @@ impl StorageManager {
 
     pub(crate) fn recompute_all_caches(&mut self) {
         let mut toposort = TopologicalSort::<SpellSelector>::new();
-        for (selector, storage) in self.storages.iter() {
+        for (selector, storage) in self.selectors.iter() {
             toposort.insert(selector.clone());
             for parent in storage.lock().unwrap().parents() {
                 toposort.add_dependency(parent, selector.clone());
@@ -251,7 +309,7 @@ impl StorageManager {
             self.get(selector).recompute_cache(self);
         }
         for selector in toposort.iter() {
-            self.get(selector).storage.clear_changes();
+            self.get(selector).storage.clear_previous();
         }
     }
 }

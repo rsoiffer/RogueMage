@@ -4,6 +4,7 @@ mod chemistry;
 mod math_utils;
 mod parser;
 mod rules_asset;
+mod sparse_matrices;
 mod spells;
 mod storage;
 

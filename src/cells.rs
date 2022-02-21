@@ -1,6 +1,7 @@
 use crate::blocks::*;
 use crate::chemistry::Property::*;
 use crate::chemistry::*;
+use crate::sparse_matrices::*;
 use crate::spells::*;
 use crate::storage::*;
 use bevy::prelude::Color;
@@ -9,43 +10,54 @@ use bevy::{
     prelude::{info_span, Commands, Component, Query, ResMut, Transform},
     sprite::{Sprite, SpriteBundle},
 };
+use rand::random;
 
-fn set_range<I1, I2>(storage: &mut StorageManager, xs: I1, ys: I2, property: Property)
+fn set_range<I1, I2>(storage: &mut StorageManager, xs: I1, ys: I2, material: u16)
 where
     I1: IntoIterator<Item = i32>,
     I2: IntoIterator<Item = i32> + Clone,
 {
-    storage.require(&SpellSelector::Is(property));
-    let mut storage = storage.get(&SpellSelector::Is(property));
     for x in xs {
         for y in ys.clone() {
             storage
-                .storage
-                .add(Object::Block(x, y), Object::Block(x, y), 1.0);
+                .material
+                .update(Object::Block(x, y), Object::Block(x, y), |x| material);
+        }
+    }
+}
+
+fn set_range_prop<I1, I2>(storage: &mut StorageManager, xs: I1, ys: I2, property: BlockProperties)
+where
+    I1: IntoIterator<Item = i32>,
+    I2: IntoIterator<Item = i32> + Clone,
+{
+    let mut storage = storage.get_prop(property);
+    for x in xs {
+        for y in ys.clone() {
+            storage.update(Object::Block(x, y), Object::Block(x, y), |_| true);
         }
     }
 }
 
 fn run_natural_rule(storage: &mut StorageManager, spell: &SpellRule) {
-    let storage1 = storage.get(&spell.selector);
-    let targets = storage1.storage.digraph.entries();
-    for (&source, &target, &connection) in targets {
+    let targets = storage.get_entries(&spell.selector);
+    for (source, target, connection) in targets {
         let rate = spell.rate * connection;
         for effect in &spell.effects {
             match effect {
-                SpellEffect::Summon => todo!(),
-                SpellEffect::Send(property) => {
-                    storage
-                        .get(&SpellSelector::Is(*property))
-                        .storage
-                        .add(target, target, rate);
+                SpellEffect::Send(BlockProperty(property)) => {
+                    if random::<f32>() < rate {
+                        storage.get_prop(*property).update(target, target, |x| true);
+                    }
                 }
-                SpellEffect::Receive(property) => {
-                    storage
-                        .get(&SpellSelector::Is(*property))
-                        .storage
-                        .add(target, target, -rate);
+                SpellEffect::Receive(BlockProperty(property)) => {
+                    if random::<f32>() < rate {
+                        storage
+                            .get_prop(*property)
+                            .update(target, target, |x| false);
+                    }
                 }
+                _ => todo!(),
             }
         }
     }
@@ -60,18 +72,13 @@ pub(crate) struct BlockSprite {
 /// Initialize the simulation and its graphics
 pub(crate) fn system_setup_block_grid(mut commands: Commands) {
     let mut storage = StorageManager::default();
-    set_range(&mut storage, 0..128, 0..128, Material(*AIR));
-    set_range(&mut storage, 115..120, 5..125, Material(*SAND));
-    set_range(&mut storage, 115..120, 5..125, Material(*SAND));
-    set_range(&mut storage, 15..20, 5..125, Material(*WATER));
-    set_range(&mut storage, 55..60, 5..125, Material(*COAL));
+    set_range(&mut storage, 0..128, 0..128, *AIR);
+    set_range(&mut storage, 115..120, 5..125, *SAND);
+    set_range(&mut storage, 115..120, 5..125, *SAND);
+    set_range(&mut storage, 15..20, 5..125, *WATER);
+    set_range(&mut storage, 55..60, 5..125, *COAL);
     // block_grid.set_range(65..70, 0..5, *FIRE);
-    set_range(
-        &mut storage,
-        35..70,
-        0..5,
-        BlockProperty(BlockProperties::BURNING),
-    );
+    set_range_prop(&mut storage, 35..70, 0..5, BlockProperties::BURNING);
     for spell_rule in NATURAL_RULES.iter() {
         storage.require(&spell_rule.selector);
     }
@@ -120,29 +127,23 @@ pub(crate) fn system_update_block_grid(
 
     let span = info_span!("Updating sprites").entered();
     for (mut sprite, bs) in query.iter_mut() {
-        // let block = block_grid.get(bs.x, bs.y).unwrap();
-        // sprite.color = block.color();
-        sprite.color = Color::WHITE;
-
-        if storage
-            .get(&SpellSelector::Is(Material(*COAL)))
-            .storage
-            .digraph
-            .get(&Object::Block(bs.x, bs.y), &Object::Block(bs.x, bs.y))
-            > 0.5
-        {
-            let x = rand::random::<f32>();
-            let coal_data = ALL_BLOCK_DATA.get(*COAL as usize).unwrap();
-            sprite.color = coal_data.color1 * x + coal_data.color2 * (1.0 - x);
-        }
+        let material = storage
+            .material
+            .current
+            .get_option(&Object::Block(bs.x, bs.y), &Object::Block(bs.x, bs.y))
+            .cloned()
+            .unwrap_or_default();
+        let block_data = ALL_BLOCK_DATA.get(material as usize).unwrap();
+        let x = random::<f32>();
+        sprite.color = block_data.color1 * x + block_data.color2 * (1.0 - x);
 
         // Draw all burning blocks as fire
         if storage
-            .get(&SpellSelector::Is(BlockProperty(BlockProperties::BURNING)))
-            .storage
-            .digraph
-            .get(&Object::Block(bs.x, bs.y), &Object::Block(bs.x, bs.y))
-            > 0.5
+            .get_prop(BlockProperties::BURNING)
+            .current
+            .get_option(&Object::Block(bs.x, bs.y), &Object::Block(bs.x, bs.y))
+            .cloned()
+            .unwrap_or_default()
         {
             let x = rand::random::<f32>();
             let fire_data = ALL_BLOCK_DATA.get(*FIRE as usize).unwrap();
