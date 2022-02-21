@@ -1,6 +1,8 @@
 use crate::blocks::*;
 use crate::chemistry::*;
 use crate::spells::*;
+use bevy::utils::HashMap;
+use bevy::utils::HashSet;
 use bevy::{
     math::Vec3,
     prelude::{info_span, Commands, Component, Query, Res, ResMut, Transform},
@@ -16,14 +18,18 @@ pub(crate) struct BlockGrid {
     grid: [[Block; GRID_SIZE]; GRID_SIZE],
     /// If true, simulate right-to-left
     flip_sim_dir: bool,
+    properties: HashMap<Property, HashSet<(i32, i32)>>,
 }
 
 impl Default for BlockGrid {
     fn default() -> Self {
-        Self {
+        let mut grid = Self {
             grid: [[Block::default(); GRID_SIZE]; GRID_SIZE],
             flip_sim_dir: Default::default(),
-        }
+            properties: HashMap::default(),
+        };
+        grid.set_range(0..GRID_SIZE as i32, 0..GRID_SIZE as i32, 0);
+        grid
     }
 }
 
@@ -38,6 +44,13 @@ impl BlockGrid {
 
     fn set(&mut self, x: i32, y: i32, block: Block) {
         if x >= 0 && x < GRID_SIZE as i32 && y >= 0 && y < GRID_SIZE as i32 {
+            let old_block = self.grid[x as usize][y as usize];
+            for p in old_block.iter_properties() {
+                self.properties.entry(p).or_default().remove(&(x, y));
+            }
+            for p in block.iter_properties() {
+                self.properties.entry(p).or_default().insert((x, y));
+            }
             self.grid[x as usize][y as usize] = block;
         }
     }
@@ -76,11 +89,37 @@ impl BlockGrid {
         for rule in &update_rules.update_rules {
             let span =
                 info_span!("Rule", rule = &bevy::utils::tracing::field::debug(rule)).entered();
-            for y in ys.clone() {
-                for x in xs.clone() {
-                    rule.update(self, x, y);
+
+            match rule {
+                UpdateRule::SpellUpdateRule(
+                    sr @ SpellRule {
+                        spell: Spell::Select(SpellSelector::Bind(sc, _), _),
+                        ..
+                    },
+                ) => match **sc {
+                    SpellSelector::Is(p) => {
+                        let blocks = self
+                            .properties
+                            .get(&p)
+                            .iter()
+                            .flat_map(|x| x.iter())
+                            .map(|&(x, y)| (x, y))
+                            .collect::<Vec<_>>();
+                        for (x, y) in blocks {
+                            rule.spell_update(sr, self, x, y);
+                        }
+                    }
+                    _ => panic!("omgwtf {:?}", sr),
+                },
+                _ => {
+                    for y in ys.clone() {
+                        for x in xs.clone() {
+                            rule.update(self, x, y);
+                        }
+                    }
                 }
             }
+
             span.exit();
         }
         self.flip_sim_dir = !self.flip_sim_dir;

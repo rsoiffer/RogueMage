@@ -15,6 +15,17 @@ bitflags! {
     }
 }
 
+impl BlockProperties {
+    pub(crate) fn iter_all() -> impl Iterator<Item = BlockProperties> {
+        [
+            BlockProperties::MOVED_THIS_STEP,
+            BlockProperties::POWDER_STABLE,
+            BlockProperties::BURNING,
+        ]
+        .into_iter()
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Block {
     /// The index into the block definitions array
@@ -82,6 +93,18 @@ impl Block {
 
     pub(crate) fn set(&mut self, property: BlockProperties, value: bool) {
         self.stored_properties.set(property, value)
+    }
+
+    pub(crate) fn iter_properties<'a>(&'a self) -> impl Iterator<Item = Property> + 'a {
+        [Property::Material(self.id)]
+            .into_iter()
+            .chain(BlockProperties::iter_all().filter_map(|p| {
+                if self.get(p) {
+                    Some(Property::BlockProperty(p))
+                } else {
+                    None
+                }
+            }))
     }
 }
 

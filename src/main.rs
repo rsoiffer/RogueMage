@@ -20,6 +20,7 @@ fn main() {
         .insert_resource(WindowDescriptor {
             width: 960.0,
             height: 540.0,
+            vsync: false,
             ..Default::default()
         })
         .add_plugins(DefaultPlugins)
