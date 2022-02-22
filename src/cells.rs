@@ -113,11 +113,12 @@ impl BlockGrid {
                             .flat_map(|x| x.iter())
                             .map(|&(x, y)| (x, y))
                             .collect::<Vec<_>>();
+
                         for (x, y) in blocks {
                             rule.spell_update(sr, self, x, y);
                         }
                     }
-                    _ => panic!("omgwtf {:?}", sr),
+                    _ => panic!("Spell started with non-Is selector: {:?}", sr),
                 },
                 _ => {
                     for y in ys.clone() {
