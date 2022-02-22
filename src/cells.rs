@@ -69,6 +69,14 @@ impl BlockGrid {
         }
     }
 
+    fn clear_property(&mut self, property: BlockProperties) {
+        for (x, y) in self.all_matching(&BlockProperty(property)) {
+            let mut block = self.get(x, y).unwrap();
+            block.set(property, false);
+            self.set_no_change(x, y, block);
+        }
+    }
+
     fn set_range<I1, I2>(&mut self, xs: I1, ys: I2, id: u16)
     where
         I1: IntoIterator<Item = i32>,
@@ -109,18 +117,9 @@ impl BlockGrid {
         };
         let ys = 0..GRID_SIZE as i32;
 
-        let span = info_span!("Reset changed flag").entered();
-        self.properties
-            .get_mut(&BlockProperty(BlockProperties::CHANGED_THIS_STEP))
-            .unwrap()
-            .clear();
-        for y in ys.clone() {
-            for x in xs.clone() {
-                let mut block = self.get(x, y).unwrap();
-                block.set(BlockProperties::CHANGED_THIS_STEP, false);
-                self.set_no_change(x, y, block);
-            }
-        }
+        let span = info_span!("Reset flags").entered();
+        self.clear_property(BlockProperties::MOVED_THIS_STEP);
+        self.clear_property(BlockProperties::CHANGED_THIS_STEP);
         span.exit();
 
         for rule in &update_rules.update_rules {
@@ -186,7 +185,6 @@ impl BlockGrid {
 
 #[derive(Debug)]
 pub(crate) enum UpdateRule {
-    ResetUpdateRule,
     PowderUpdateRule,
     LiquidUpdateRule,
     SpellUpdateRule(&'static SpellRule),
@@ -194,17 +192,10 @@ pub(crate) enum UpdateRule {
 impl UpdateRule {
     fn update(&self, grid: &mut BlockGrid, x: i32, y: i32) {
         match self {
-            UpdateRule::ResetUpdateRule => self.reset_update(grid, x, y),
             UpdateRule::PowderUpdateRule => self.powder_update(grid, x, y),
             UpdateRule::LiquidUpdateRule => self.liquid_update(grid, x, y),
             UpdateRule::SpellUpdateRule(c) => self.spell_update(c, grid, x, y),
         }
-    }
-
-    fn reset_update(&self, grid: &mut BlockGrid, x: i32, y: i32) {
-        let mut block = grid.get(x, y).unwrap();
-        block.set(BlockProperties::MOVED_THIS_STEP, false);
-        grid.set(x, y, block);
     }
 
     fn powder_update(&self, grid: &mut BlockGrid, x: i32, y: i32) {
@@ -382,11 +373,8 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     );
     let texture_handle = textures.add(texture);
 
-    let mut update_rules: Vec<UpdateRule> = vec![
-        UpdateRule::ResetUpdateRule,
-        UpdateRule::PowderUpdateRule,
-        UpdateRule::LiquidUpdateRule,
-    ];
+    let mut update_rules: Vec<UpdateRule> =
+        vec![UpdateRule::PowderUpdateRule, UpdateRule::LiquidUpdateRule];
     for r in NATURAL_RULES.iter() {
         update_rules.push(UpdateRule::SpellUpdateRule(r));
     }
