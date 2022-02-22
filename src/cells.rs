@@ -70,7 +70,10 @@ impl BlockGrid {
     }
 
     fn clear_property(&mut self, property: BlockProperties) {
-        for (x, y) in self.all_matching(&BlockProperty(property)) {
+        for (x, y) in self
+            .all_matching(&BlockProperty(property))
+            .collect::<Vec<_>>()
+        {
             let mut block = self.get(x, y).unwrap();
             block.set(property, false);
             self.set_no_change(x, y, block);
@@ -100,13 +103,12 @@ impl BlockGrid {
         }
     }
 
-    fn all_matching(&self, property: &Property) -> Vec<(i32, i32)> {
+    fn all_matching<'a>(&'a self, property: &Property) -> impl Iterator<Item = (i32, i32)> + 'a {
         self.properties
             .get(property)
-            .iter()
+            .into_iter()
             .flat_map(|x| x.iter())
             .map(|&(x, y)| (x, y))
-            .collect::<Vec<_>>()
     }
 
     fn step(&mut self, update_rules: &UpdateRules) {
@@ -134,7 +136,7 @@ impl BlockGrid {
                     },
                 ) => match **sc {
                     SpellSelector::Is(p) => {
-                        for (x, y) in self.all_matching(&p) {
+                        for (x, y) in self.all_matching(&p).collect::<Vec<_>>() {
                             rule.spell_update(sr, self, x, y);
                         }
                     }
