@@ -1,6 +1,12 @@
 use crate::blocks::*;
 use crate::chemistry::*;
 use crate::spells::*;
+use bevy::prelude::Assets;
+use bevy::prelude::Handle;
+use bevy::prelude::Image;
+use bevy::render::render_resource::Extent3d;
+use bevy::render::render_resource::TextureDimension;
+use bevy::render::render_resource::TextureFormat;
 use bevy::utils::HashMap;
 use bevy::utils::HashSet;
 use bevy::{
@@ -327,13 +333,12 @@ pub(crate) struct UpdateRules {
 }
 
 #[derive(Component)]
-pub(crate) struct BlockSprite {
-    x: i32,
-    y: i32,
+pub(crate) struct BlockGridComponent {
+    grid: BlockGrid,
 }
 
 /// Initialize the simulation and its graphics
-pub(crate) fn system_setup_block_grid(mut commands: Commands) {
+pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResMut<Assets<Image>>) {
     let mut block_grid = BlockGrid::default();
     block_grid.set_range(115..120, 5..125, *SAND);
     block_grid.set_range(15..20, 5..125, *WATER);
@@ -342,7 +347,18 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands) {
     block_grid.set_range_func(65..70, 0..5, |block| {
         block.set(BlockProperties::BURNING, true)
     });
-    commands.insert_resource(block_grid);
+
+    let texture = Image::new_fill(
+        Extent3d {
+            width: GRID_SIZE as u32,
+            height: GRID_SIZE as u32,
+            depth_or_array_layers: 1,
+        },
+        TextureDimension::D2,
+        &[0, 0, 0, 0],
+        TextureFormat::Rgba8UnormSrgb,
+    );
+    let texture_handle = textures.add(texture);
 
     let mut update_rules: Vec<UpdateRule> = vec![
         UpdateRule::ResetUpdateRule,
@@ -354,44 +370,49 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands) {
     }
     commands.insert_resource(UpdateRules { update_rules });
 
-    for x in 0..GRID_SIZE as i32 {
-        for y in 0..GRID_SIZE as i32 {
-            let scale = 3.0;
-            commands
-                .spawn_bundle(SpriteBundle {
-                    transform: Transform::from_xyz(
-                        -192.0 + scale * x as f32,
-                        -192.0 + scale * y as f32,
-                        2.0,
-                    )
-                    .with_scale(Vec3::splat(scale)),
-                    ..Default::default()
-                })
-                .insert(BlockSprite { x, y });
-        }
-    }
+    let scale = 3.0;
+    commands
+        .spawn_bundle(SpriteBundle {
+            transform: Transform::from_xyz(0.0, 0.0, 2.0).with_scale(Vec3::splat(scale)),
+            texture: texture_handle,
+            ..Default::default()
+        })
+        .insert(BlockGridComponent { grid: block_grid });
 }
 
 /// Step the simulation, update the graphics
 pub(crate) fn system_update_block_grid(
-    mut block_grid: ResMut<BlockGrid>,
+    // mut block_grid: ResMut<BlockGrid>,
     update_rules: Res<UpdateRules>,
-    mut query: Query<(&mut Sprite, &BlockSprite)>,
+    mut textures: ResMut<Assets<Image>>,
+    mut query: Query<(&mut BlockGridComponent, &Handle<Image>)>,
 ) {
-    let span = info_span!("Stepping blocks").entered();
-    block_grid.step(&update_rules);
-    span.exit();
-    let span = info_span!("Updating sprites").entered();
-    for (mut sprite, bs) in query.iter_mut() {
-        let block = block_grid.get(bs.x, bs.y).unwrap();
-        sprite.color = block.color();
+    for (mut block_grid, texture_handle) in query.iter_mut() {
+        let span = info_span!("Stepping blocks").entered();
+        block_grid.grid.step(&update_rules);
+        span.exit();
 
-        // Draw all burning blocks as fire
-        if block.get(BlockProperties::BURNING) {
-            let x = rand::random::<f32>();
-            let fire_data = ALL_BLOCK_DATA.get(*FIRE as usize).unwrap();
-            sprite.color = fire_data.color1 * x + fire_data.color2 * (1.0 - x);
+        let span = info_span!("Updating sprites").entered();
+        let texture = textures.get_mut(texture_handle).unwrap();
+        for x in 0..GRID_SIZE {
+            for y in 0..GRID_SIZE {
+                let block = block_grid.grid.get(x as i32, y as i32).unwrap();
+                let mut color = block.color();
+
+                // Draw all burning blocks as fire
+                if block.get(BlockProperties::BURNING) {
+                    let x = rand::random::<f32>();
+                    let fire_data = ALL_BLOCK_DATA.get(*FIRE as usize).unwrap();
+                    color = fire_data.color1 * x + fire_data.color2 * (1.0 - x);
+                }
+
+                let i = 4 * (x + (GRID_SIZE - y - 1) * GRID_SIZE);
+                texture.data.splice(
+                    i..i + 4,
+                    color.as_rgba_f32().iter().map(|&x| (x * 255.0) as u8),
+                );
+            }
         }
+        span.exit();
     }
-    span.exit();
 }

@@ -28,7 +28,7 @@ fn main() {
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
         .init_resource::<NaturalRules>()
-        .insert_resource(ClearColor(Color::rgb(0.5, 0.5, 0.5)))
+        .insert_resource(ClearColor(Color::rgb(0.2, 0.2, 0.2)))
         .insert_resource(RapierConfiguration {
             gravity: Vector::y() * -1000.0,
             ..Default::default()
