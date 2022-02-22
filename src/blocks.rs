@@ -12,6 +12,8 @@ bitflags! {
         const POWDER_STABLE = 1 << 1;
         /// Is this block currently on fire
         const BURNING = 1 << 2;
+        /// Has this block changed at all this step
+        const CHANGED_THIS_STEP = 1 << 3;
     }
 }
 
@@ -21,6 +23,7 @@ impl BlockProperties {
             BlockProperties::MOVED_THIS_STEP,
             BlockProperties::POWDER_STABLE,
             BlockProperties::BURNING,
+            BlockProperties::CHANGED_THIS_STEP,
         ]
         .into_iter()
     }

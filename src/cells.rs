@@ -1,4 +1,5 @@
 use crate::blocks::*;
+use crate::chemistry::Property::*;
 use crate::chemistry::*;
 use crate::spells::*;
 use bevy::prelude::Assets;
@@ -12,7 +13,7 @@ use bevy::utils::HashSet;
 use bevy::{
     math::Vec3,
     prelude::{info_span, Commands, Component, Query, Res, ResMut, Transform},
-    sprite::{Sprite, SpriteBundle},
+    sprite::SpriteBundle,
 };
 use rand::seq::SliceRandom;
 
@@ -48,7 +49,12 @@ impl BlockGrid {
         }
     }
 
-    fn set(&mut self, x: i32, y: i32, block: Block) {
+    fn set(&mut self, x: i32, y: i32, mut block: Block) {
+        block.set(BlockProperties::CHANGED_THIS_STEP, true);
+        self.set_no_change(x, y, block);
+    }
+
+    fn set_no_change(&mut self, x: i32, y: i32, block: Block) {
         if x >= 0 && x < GRID_SIZE as i32 && y >= 0 && y < GRID_SIZE as i32 {
             let old_block = self.grid[x as usize][y as usize];
             if block != old_block {
@@ -86,6 +92,15 @@ impl BlockGrid {
         }
     }
 
+    fn all_matching(&self, property: &Property) -> Vec<(i32, i32)> {
+        self.properties
+            .get(property)
+            .iter()
+            .flat_map(|x| x.iter())
+            .map(|&(x, y)| (x, y))
+            .collect::<Vec<_>>()
+    }
+
     fn step(&mut self, update_rules: &UpdateRules) {
         let xs = if self.flip_sim_dir {
             num::range_step(GRID_SIZE as i32 - 1, 0, -1)
@@ -93,6 +108,20 @@ impl BlockGrid {
             num::range_step(0, GRID_SIZE as i32, 1)
         };
         let ys = 0..GRID_SIZE as i32;
+
+        let span = info_span!("Reset changed flag").entered();
+        self.properties
+            .get_mut(&BlockProperty(BlockProperties::CHANGED_THIS_STEP))
+            .unwrap()
+            .clear();
+        for y in ys.clone() {
+            for x in xs.clone() {
+                let mut block = self.get(x, y).unwrap();
+                block.set(BlockProperties::CHANGED_THIS_STEP, false);
+                self.set_no_change(x, y, block);
+            }
+        }
+        span.exit();
 
         for rule in &update_rules.update_rules {
             let span =
@@ -106,15 +135,7 @@ impl BlockGrid {
                     },
                 ) => match **sc {
                     SpellSelector::Is(p) => {
-                        let blocks = self
-                            .properties
-                            .get(&p)
-                            .iter()
-                            .flat_map(|x| x.iter())
-                            .map(|&(x, y)| (x, y))
-                            .collect::<Vec<_>>();
-
-                        for (x, y) in blocks {
+                        for (x, y) in self.all_matching(&p) {
                             rule.spell_update(sr, self, x, y);
                         }
                     }
@@ -312,13 +333,13 @@ impl UpdateRule {
             };
             for effect in result.effects {
                 match effect {
-                    SpellEffect::Send(Property::Material(id)) => {
+                    SpellEffect::Send(Material(id)) => {
                         block2 = Block::new(*id);
                     }
-                    SpellEffect::Send(Property::BlockProperty(property)) => {
+                    SpellEffect::Send(BlockProperty(property)) => {
                         block2.set(*property, true);
                     }
-                    SpellEffect::Receive(Property::BlockProperty(property)) => {
+                    SpellEffect::Receive(BlockProperty(property)) => {
                         block2.set(*property, false);
                     }
                     _ => todo!(),
@@ -395,24 +416,26 @@ pub(crate) fn system_update_block_grid(
 
         let span = info_span!("Updating sprites").entered();
         let texture = textures.get_mut(texture_handle).unwrap();
-        for x in 0..GRID_SIZE {
-            for y in 0..GRID_SIZE {
-                let block = block_grid.grid.get(x as i32, y as i32).unwrap();
-                let mut color = block.color();
 
-                // Draw all burning blocks as fire
-                if block.get(BlockProperties::BURNING) {
-                    let x = rand::random::<f32>();
-                    let fire_data = ALL_BLOCK_DATA.get(*FIRE as usize).unwrap();
-                    color = fire_data.color1 * x + fire_data.color2 * (1.0 - x);
-                }
+        for (x, y) in block_grid
+            .grid
+            .all_matching(&BlockProperty(BlockProperties::CHANGED_THIS_STEP))
+        {
+            let block = block_grid.grid.get(x, y).unwrap();
+            let mut color = block.color();
 
-                let i = 4 * (x + (GRID_SIZE - y - 1) * GRID_SIZE);
-                texture.data.splice(
-                    i..i + 4,
-                    color.as_rgba_f32().iter().map(|&x| (x * 255.0) as u8),
-                );
+            // Draw all burning blocks as fire
+            if block.get(BlockProperties::BURNING) {
+                let x = rand::random::<f32>();
+                let fire_data = ALL_BLOCK_DATA.get(*FIRE as usize).unwrap();
+                color = fire_data.color1 * x + fire_data.color2 * (1.0 - x);
             }
+
+            let i = 4 * (x as usize + (GRID_SIZE - y as usize - 1) * GRID_SIZE);
+            texture.data.splice(
+                i..i + 4,
+                color.as_rgba_f32().iter().map(|&v| (v * 255.0) as u8),
+            );
         }
         span.exit();
     }
