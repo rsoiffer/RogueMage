@@ -108,6 +108,16 @@ impl Block {
                     None
                 }
             }))
+            .chain(if self.data().physics == BlockPhysics::Powder {
+                Some(Property::Powder)
+            } else {
+                None
+            })
+            .chain(if self.data().physics == BlockPhysics::Liquid {
+                Some(Property::Liquid)
+            } else {
+                None
+            })
     }
 }
 

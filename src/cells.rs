@@ -1,6 +1,7 @@
 use crate::blocks::*;
 use crate::chemistry::Property::*;
 use crate::chemistry::*;
+use crate::spells::SpellSelector::*;
 use crate::spells::*;
 use bevy::prelude::Assets;
 use bevy::prelude::Handle;
@@ -18,13 +19,14 @@ use bevy::{
 use rand::seq::SliceRandom;
 
 /// The size of the whole grid of blocks
-const GRID_SIZE: usize = 256;
+const GRID_SIZE: usize = 512;
 
 pub(crate) struct BlockGrid {
     /// The 2d array of blocks
     grid: Vec<Block>,
     /// If true, simulate right-to-left
     flip_sim_dir: bool,
+    /// Caches the set of blocks that satisfy each property
     properties: HashMap<Property, HashSet<(i32, i32)>>,
 }
 
@@ -71,7 +73,7 @@ impl BlockGrid {
 
     fn clear_property(&mut self, property: BlockProperties) {
         for (x, y) in self
-            .all_matching(&BlockProperty(property))
+            .all_matching(BlockProperty(property))
             .collect::<Vec<_>>()
         {
             let mut block = self.get(x, y).unwrap();
@@ -103,22 +105,15 @@ impl BlockGrid {
         }
     }
 
-    fn all_matching<'a>(&'a self, property: &Property) -> impl Iterator<Item = (i32, i32)> + 'a {
+    fn all_matching<'a>(&'a self, property: Property) -> impl Iterator<Item = (i32, i32)> + 'a {
         self.properties
-            .get(property)
+            .get(&property)
             .into_iter()
             .flat_map(|x| x.iter())
             .map(|&(x, y)| (x, y))
     }
 
     fn step(&mut self, update_rules: &UpdateRules) {
-        let xs = if self.flip_sim_dir {
-            num::range_step(GRID_SIZE as i32 - 1, 0, -1)
-        } else {
-            num::range_step(0, GRID_SIZE as i32, 1)
-        };
-        let ys = 0..GRID_SIZE as i32;
-
         let span = info_span!("Reset flags").entered();
         self.clear_property(BlockProperties::MOVED_THIS_STEP);
         self.clear_property(BlockProperties::CHANGED_THIS_STEP);
@@ -128,27 +123,8 @@ impl BlockGrid {
             let span =
                 info_span!("Rule", rule = &bevy::utils::tracing::field::debug(rule)).entered();
 
-            match rule {
-                UpdateRule::SpellUpdateRule(
-                    sr @ SpellRule {
-                        spell: Spell::Select(SpellSelector::Bind(sc, _), _),
-                        ..
-                    },
-                ) => match **sc {
-                    SpellSelector::Is(p) => {
-                        for (x, y) in self.all_matching(&p).collect::<Vec<_>>() {
-                            rule.spell_update(sr, self, x, y);
-                        }
-                    }
-                    _ => panic!("Spell started with non-Is selector: {:?}", sr),
-                },
-                _ => {
-                    for y in ys.clone() {
-                        for x in xs.clone() {
-                            rule.update(self, x, y);
-                        }
-                    }
-                }
+            for (x, y) in self.all_matching(rule.only_run_on()).collect::<Vec<_>>() {
+                rule.update(self, x, y);
             }
 
             span.exit();
@@ -192,6 +168,24 @@ pub(crate) enum UpdateRule {
     SpellUpdateRule(&'static SpellRule),
 }
 impl UpdateRule {
+    fn only_run_on(&self) -> Property {
+        match self {
+            UpdateRule::PowderUpdateRule => Powder,
+            UpdateRule::LiquidUpdateRule => Liquid,
+            UpdateRule::SpellUpdateRule(sr) => match &sr.spell {
+                Spell::Select(selector, _) => match selector {
+                    Is(property) => *property,
+                    Bind(selector, _) => match **selector {
+                        Is(property) => property,
+                        _ => panic!("Spell started with non-Is selector: {:?}", sr),
+                    },
+                    _ => panic!("Spell started with non-Is selector: {:?}", sr),
+                },
+                _ => panic!("Spell doesn't have any selectors: {:?}", sr),
+            },
+        }
+    }
+
     fn update(&self, grid: &mut BlockGrid, x: i32, y: i32) {
         match self {
             UpdateRule::PowderUpdateRule => self.powder_update(grid, x, y),
@@ -382,7 +376,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     }
     commands.insert_resource(UpdateRules { update_rules });
 
-    let scale = 2.0;
+    let scale = 1.0;
     commands
         .spawn_bundle(SpriteBundle {
             transform: Transform::from_xyz(0.0, 0.0, 2.0).with_scale(Vec3::splat(scale)),
@@ -409,7 +403,7 @@ pub(crate) fn system_update_block_grid(
 
         for (x, y) in block_grid
             .grid
-            .all_matching(&BlockProperty(BlockProperties::CHANGED_THIS_STEP))
+            .all_matching(BlockProperty(BlockProperties::CHANGED_THIS_STEP))
         {
             let block = block_grid.grid.get(x, y).unwrap();
             let mut color = block.color();
