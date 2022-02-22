@@ -18,11 +18,11 @@ use bevy::{
 use rand::seq::SliceRandom;
 
 /// The size of the whole grid of blocks
-const GRID_SIZE: usize = 128;
+const GRID_SIZE: usize = 256;
 
 pub(crate) struct BlockGrid {
     /// The 2d array of blocks
-    grid: [[Block; GRID_SIZE]; GRID_SIZE],
+    grid: Vec<Block>,
     /// If true, simulate right-to-left
     flip_sim_dir: bool,
     properties: HashMap<Property, HashSet<(i32, i32)>>,
@@ -31,7 +31,7 @@ pub(crate) struct BlockGrid {
 impl Default for BlockGrid {
     fn default() -> Self {
         let mut grid = Self {
-            grid: [[Block::default(); GRID_SIZE]; GRID_SIZE],
+            grid: vec![Block::default(); GRID_SIZE * GRID_SIZE],
             flip_sim_dir: Default::default(),
             properties: HashMap::default(),
         };
@@ -43,7 +43,7 @@ impl Default for BlockGrid {
 impl BlockGrid {
     pub(crate) fn get(&self, x: i32, y: i32) -> Option<Block> {
         if x >= 0 && x < GRID_SIZE as i32 && y >= 0 && y < GRID_SIZE as i32 {
-            Some(self.grid[x as usize][y as usize])
+            Some(self.grid[y as usize * GRID_SIZE + x as usize])
         } else {
             None
         }
@@ -56,7 +56,7 @@ impl BlockGrid {
 
     fn set_no_change(&mut self, x: i32, y: i32, block: Block) {
         if x >= 0 && x < GRID_SIZE as i32 && y >= 0 && y < GRID_SIZE as i32 {
-            let old_block = self.grid[x as usize][y as usize];
+            let old_block = self.grid[y as usize * GRID_SIZE + x as usize];
             if block != old_block {
                 for p in old_block.iter_properties() {
                     self.properties.entry(p).or_default().remove(&(x, y));
@@ -64,7 +64,7 @@ impl BlockGrid {
                 for p in block.iter_properties() {
                     self.properties.entry(p).or_default().insert((x, y));
                 }
-                self.grid[x as usize][y as usize] = block;
+                self.grid[y as usize * GRID_SIZE + x as usize] = block;
             }
         }
     }
@@ -382,7 +382,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     }
     commands.insert_resource(UpdateRules { update_rules });
 
-    let scale = 3.0;
+    let scale = 2.0;
     commands
         .spawn_bundle(SpriteBundle {
             transform: Transform::from_xyz(0.0, 0.0, 2.0).with_scale(Vec3::splat(scale)),
