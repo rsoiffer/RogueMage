@@ -346,6 +346,24 @@ pub(crate) struct BlockGridComponent {
     grid: BlockGrid,
 }
 
+fn update_texture_pixel(grid: &BlockGrid, texture: &mut Image, x: i32, y: i32) {
+    let block = grid.get(x, y).unwrap();
+    let mut color = block.color();
+
+    // Draw all burning blocks as fire
+    if block.get(BlockProperties::BURNING) {
+        let x = rand::random::<f32>();
+        let fire_data = ALL_BLOCK_DATA.get(*FIRE as usize).unwrap();
+        color = fire_data.color1 * x + fire_data.color2 * (1.0 - x);
+    }
+
+    let i = 4 * (x as usize + (GRID_SIZE - y as usize - 1) * GRID_SIZE);
+    texture.data.splice(
+        i..i + 4,
+        color.as_rgba_f32().iter().map(|&v| (v * 255.0) as u8),
+    );
+}
+
 /// Initialize the simulation and its graphics
 pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResMut<Assets<Image>>) {
     let mut block_grid = BlockGrid::default();
@@ -357,7 +375,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
         block.set(BlockProperties::BURNING, true)
     });
 
-    let texture = Image::new_fill(
+    let mut texture = Image::new_fill(
         Extent3d {
             width: GRID_SIZE as u32,
             height: GRID_SIZE as u32,
@@ -367,6 +385,11 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
         &[0, 0, 0, 0],
         TextureFormat::Rgba8UnormSrgb,
     );
+    for x in 0..GRID_SIZE as i32 {
+        for y in 0..GRID_SIZE as i32 {
+            update_texture_pixel(&block_grid, &mut texture, x, y);
+        }
+    }
     let texture_handle = textures.add(texture);
 
     let mut update_rules: Vec<UpdateRule> =
@@ -405,21 +428,7 @@ pub(crate) fn system_update_block_grid(
             .grid
             .all_matching(BlockProperty(BlockProperties::CHANGED_THIS_STEP))
         {
-            let block = block_grid.grid.get(x, y).unwrap();
-            let mut color = block.color();
-
-            // Draw all burning blocks as fire
-            if block.get(BlockProperties::BURNING) {
-                let x = rand::random::<f32>();
-                let fire_data = ALL_BLOCK_DATA.get(*FIRE as usize).unwrap();
-                color = fire_data.color1 * x + fire_data.color2 * (1.0 - x);
-            }
-
-            let i = 4 * (x as usize + (GRID_SIZE - y as usize - 1) * GRID_SIZE);
-            texture.data.splice(
-                i..i + 4,
-                color.as_rgba_f32().iter().map(|&v| (v * 255.0) as u8),
-            );
+            update_texture_pixel(&block_grid.grid, texture, x, y);
         }
         span.exit();
     }
