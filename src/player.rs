@@ -1,4 +1,7 @@
-use bevy::prelude::*;
+use bevy::{
+    math::{Vec3Swizzles, XY},
+    prelude::*,
+};
 use bevy_rapier2d::prelude::*;
 
 #[derive(Component)]
@@ -6,6 +9,7 @@ pub(crate) struct Player;
 
 const ACCELERATION: Real = 1000.0;
 const DRAG: Real = 10.0;
+const CAMERA_RATE: Real = 4.0;
 
 pub(crate) fn move_player_system(
     input: Res<Input<KeyCode>>,
@@ -50,6 +54,26 @@ pub(crate) fn spawn_player(commands: &mut Commands, texture: Handle<Image>) -> E
         .insert(RigidBodyPositionSync::Discrete)
         .insert(Player)
         .id()
+}
+
+pub(crate) fn move_camera_system(
+    time: Res<Time>,
+    mut query: QuerySet<(
+        QueryState<&Transform, With<Player>>,
+        QueryState<&mut Transform, With<Camera>>,
+    )>,
+) {
+    let player_translation = query.q0().single().translation.xy();
+
+    let mut camera_query = query.q1();
+    let mut camera_transform = camera_query.single_mut();
+    let XY { x, y } = *player_translation.lerp(
+        camera_transform.translation.xy(),
+        f32::exp(-CAMERA_RATE * time.delta_seconds()),
+    );
+
+    camera_transform.translation.x = x;
+    camera_transform.translation.y = y;
 }
 
 fn thrust_component(input: &Input<KeyCode>, positive: KeyCode, negative: KeyCode) -> Real {
