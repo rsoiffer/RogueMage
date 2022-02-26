@@ -3,6 +3,7 @@ mod cells;
 mod chemistry;
 mod math_utils;
 mod parser;
+mod player;
 mod rules_asset;
 mod spells;
 
@@ -13,6 +14,7 @@ use bevy::{
 use bevy_rapier2d::prelude::*;
 use cells::*;
 use chemistry::*;
+use player::{move_player_system, spawn_player};
 use rules_asset::{RulesAsset, RulesAssetLoader};
 
 fn main() {
@@ -38,6 +40,7 @@ fn main() {
         .add_startup_system(setup)
         .add_startup_system(system_setup_block_grid)
         .add_system(system_update_block_grid)
+        .add_system(move_player_system)
         .run();
 }
 
@@ -47,8 +50,7 @@ fn setup(
     mut natural_rules: ResMut<NaturalRules>,
 ) {
     asset_server.watch_for_changes().unwrap();
-
     natural_rules.0 = asset_server.load("natural.rules");
-
+    spawn_player(&mut commands, asset_server.load("sprites/cat_alive.png"));
     commands.spawn_bundle(OrthographicCameraBundle::new_2d());
 }
