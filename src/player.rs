@@ -17,10 +17,10 @@ pub(crate) fn move_player_system(
     )>,
 ) {
     for (_, mass, velocity, mut forces) in query.iter_mut() {
-        let thrust_unnormalized = Vector::new(
+        let thrust_unnormalized = vector![
             thrust_component(&input, KeyCode::D, KeyCode::A),
-            thrust_component(&input, KeyCode::W, KeyCode::S),
-        );
+            thrust_component(&input, KeyCode::W, KeyCode::S)
+        ];
 
         let thrust = if thrust_unnormalized.norm() < 1e-6 {
             Vector::zeros()
