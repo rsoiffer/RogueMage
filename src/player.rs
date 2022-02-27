@@ -13,14 +13,16 @@ const CAMERA_RATE: Real = 4.0;
 
 pub(crate) fn move_player_system(
     input: Res<Input<KeyCode>>,
-    mut query: Query<(
-        &Player,
-        &RigidBodyMassPropsComponent,
-        &RigidBodyVelocityComponent,
-        &mut RigidBodyForcesComponent,
-    )>,
+    mut query: Query<
+        (
+            &RigidBodyMassPropsComponent,
+            &RigidBodyVelocityComponent,
+            &mut RigidBodyForcesComponent,
+        ),
+        With<Player>,
+    >,
 ) {
-    for (_, mass, velocity, mut forces) in query.iter_mut() {
+    for (mass, velocity, mut forces) in query.iter_mut() {
         let thrust_unnormalized = vector![
             thrust_component(&input, KeyCode::D, KeyCode::A),
             thrust_component(&input, KeyCode::W, KeyCode::S)
