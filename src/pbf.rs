@@ -1,6 +1,6 @@
 use bevy::{
     math::Vec2,
-    prelude::{info_span, AssetServer, Commands, Component, Query, Res, Transform, With},
+    prelude::{info_span, AssetServer, Color, Commands, Component, Query, Res, Transform, With},
     sprite::{Sprite, SpriteBundle},
     utils::HashMap,
 };
@@ -8,14 +8,14 @@ use std::f32::consts::PI;
 
 const N: usize = 5000;
 const DT: f32 = 1.0 / 60.0;
-const RHO0: f32 = 0.15;
+const RHO0: f32 = 1.0;
 const MASS: f32 = 1.0;
-const H: f32 = 4.0;
+const H: f32 = 2.0;
 const EPS: f32 = 1e-1;
-const DIFFUSION: f32 = 0.5;
+const DIFFUSION: f32 = 0.05;
 const ITERS: usize = 2;
 
-const SIM_SPACE: f32 = 200.0;
+const SIM_SPACE: f32 = 100.0;
 
 fn Wpoly6(x: Vec2) -> f32 {
     let r2 = x.length_squared();
@@ -69,11 +69,12 @@ impl ParticleList {
 
     fn dCi2(&self, i: usize, k: usize) -> f32 {
         if i == k {
-            let mut v = Vec2::ZERO;
-            for &j in self.particles[i].neighbors.iter() {
-                v += dWspiky(self.particles[i].pred_pos - self.particles[j].pred_pos);
-            }
-            (v / RHO0).length_squared()
+            0.0
+            // let mut v = Vec2::ZERO;
+            // for &j in self.particles[i].neighbors.iter() {
+            //     v += dWspiky(self.particles[i].pred_pos - self.particles[j].pred_pos);
+            // }
+            // (v / RHO0).length_squared()
         } else {
             (dWspiky(self.particles[i].pred_pos - self.particles[k].pred_pos) / RHO0)
                 .length_squared()
@@ -106,10 +107,11 @@ pub(crate) fn particle_start(mut commands: Commands, asset_server: Res<AssetServ
         commands
             .spawn_bundle(SpriteBundle {
                 sprite: Sprite {
+                    color: Color::rgb(0.2, 0.4, 1.0),
                     custom_size: Some(Vec2::splat(1.0)),
                     ..Default::default()
                 },
-                texture: asset_server.load("sprites/cat_alive.png"),
+                texture: asset_server.load("sprites/white_pixel.png"),
                 ..Default::default()
             })
             .insert(ParticleSprite);
@@ -129,7 +131,7 @@ pub(crate) fn particle_update(
     span.exit();
 
     // Find neighbors
-    let span = info_span!("Find neighbors").entered();
+    let span = info_span!("Make grid hashmap").entered();
     let mut hashmap = HashMap::<(i32, i32), Vec<usize>>::default();
     for i in 0..N {
         let p = &particles.particles[i];
@@ -140,6 +142,8 @@ pub(crate) fn particle_update(
         let e = hashmap.entry(key);
         e.or_default().push(i);
     }
+    span.exit();
+    let span = info_span!("Find neighbors").entered();
     for i in 0..N {
         unsafe {
             let p1 = &mut particles.particles[i] as *mut Particle;
@@ -152,7 +156,11 @@ pub(crate) fn particle_update(
             for x in key.0 - 1..key.0 + 2 {
                 for y in key.1 - 1..key.1 + 2 {
                     match hashmap.get(&(x, y)) {
-                        Some(l) => p.neighbors.extend(l),
+                        Some(l) => p.neighbors.extend(l.iter().filter(|&&j| {
+                            (particles.particles[i].pred_pos - particles.particles[j].pred_pos)
+                                .length_squared()
+                                < H * H
+                        })),
                         None => {}
                     }
                 }
@@ -172,7 +180,7 @@ pub(crate) fn particle_update(
                 .iter()
                 .map(|&j| particles.dCi2(i, j))
                 .sum::<f32>();
-            particles.particles[i].lambda = -particles.Ci(i) / (denom + EPS);
+            particles.particles[i].lambda = -particles.Ci(i) / (2.0 * denom + EPS);
         }
         span2.exit();
 
@@ -180,12 +188,14 @@ pub(crate) fn particle_update(
         for i in 0..N {
             let mut delta_pos = Vec2::ZERO;
             for &j in particles.particles[i].neighbors.iter() {
-                let dpos = particles.particles[i].pred_pos - particles.particles[j].pred_pos;
-                let scorr = -0.1 * f32::powi(Wpoly6(dpos) / Wpoly6(Vec2::new(0.0, 0.2 * H)), 4);
-                delta_pos +=
-                    (particles.particles[i].lambda + particles.particles[j].lambda + scorr)
-                        * dWspiky(dpos)
-                        / RHO0;
+                if j != i {
+                    let dpos = particles.particles[i].pred_pos - particles.particles[j].pred_pos;
+                    let scorr = -0.1 * f32::powi(Wpoly6(dpos) / Wpoly6(Vec2::new(0.0, 0.2 * H)), 4);
+                    delta_pos +=
+                        (particles.particles[i].lambda + particles.particles[j].lambda + scorr)
+                            * dWspiky(dpos)
+                            / RHO0;
+                }
             }
             particles.particles[i].delta_pos = delta_pos;
         }
