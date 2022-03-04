@@ -51,7 +51,8 @@ struct Particle {
     pred_pos: Vec2,
     delta_pos: Vec2,
     lambda: f32,
-    neighbors: Vec<usize>,
+    neighbors_start: usize,
+    neighbors_end: usize,
 }
 
 #[derive(Component)]
@@ -60,9 +61,15 @@ pub(crate) struct ParticleSprite;
 #[derive(Component)]
 pub(crate) struct ParticleList {
     particles: Vec<Particle>,
+    neighbors: Vec<usize>,
 }
 
 impl ParticleList {
+    fn neighbors(&self, i: usize) -> impl Iterator<Item = &usize> {
+        let p = &self.particles[i];
+        self.neighbors[p.neighbors_start..p.neighbors_end].iter()
+    }
+
     fn Ci(&self, i: usize) -> f32 {
         self.density(i) / RHO0 - 1.0
     }
@@ -70,11 +77,6 @@ impl ParticleList {
     fn dCi2(&self, i: usize, k: usize) -> f32 {
         if i == k {
             0.0
-            // let mut v = Vec2::ZERO;
-            // for &j in self.particles[i].neighbors.iter() {
-            //     v += dWspiky(self.particles[i].pred_pos - self.particles[j].pred_pos);
-            // }
-            // (v / RHO0).length_squared()
         } else {
             (dWspiky(self.particles[i].pred_pos - self.particles[k].pred_pos) / RHO0)
                 .length_squared()
@@ -83,8 +85,7 @@ impl ParticleList {
 
     fn density(&self, i: usize) -> f32 {
         let p1 = &self.particles[i];
-        p1.neighbors
-            .iter()
+        self.neighbors(i)
             .map(|&j| &self.particles[j])
             .map(|p2| MASS * Wpoly6(p2.pred_pos - p1.pred_pos))
             .sum()
@@ -101,7 +102,10 @@ pub(crate) fn particle_start(mut commands: Commands, asset_server: Res<AssetServ
         );
         particles.push(p);
     }
-    commands.spawn().insert(ParticleList { particles });
+    commands.spawn().insert(ParticleList {
+        particles,
+        neighbors: vec![],
+    });
 
     for i in 0..N {
         commands
@@ -111,7 +115,7 @@ pub(crate) fn particle_start(mut commands: Commands, asset_server: Res<AssetServ
                     custom_size: Some(Vec2::splat(1.0)),
                     ..Default::default()
                 },
-                texture: asset_server.load("sprites/white_pixel.png"),
+                // texture: asset_server.load("sprites/white_pixel.png"),
                 ..Default::default()
             })
             .insert(ParticleSprite);
@@ -123,6 +127,7 @@ pub(crate) fn particle_update(
     mut query2: Query<&mut Transform, With<ParticleSprite>>,
 ) {
     let mut particles = query.single_mut();
+
     let span = info_span!("Stage 1").entered();
     for p in particles.particles.iter_mut() {
         p.vel += Vec2::new(0.0, -40.0 * DT);
@@ -144,27 +149,32 @@ pub(crate) fn particle_update(
     }
     span.exit();
     let span = info_span!("Find neighbors").entered();
-    for i in 0..N {
-        unsafe {
-            let p1 = &mut particles.particles[i] as *mut Particle;
-            let p = &mut *p1;
-            let key = (
-                (p.pred_pos.x / H).floor() as i32,
-                (p.pred_pos.y / H).floor() as i32,
-            );
-            p.neighbors.clear();
-            for x in key.0 - 1..key.0 + 2 {
-                for y in key.1 - 1..key.1 + 2 {
-                    match hashmap.get(&(x, y)) {
-                        Some(l) => p.neighbors.extend(l.iter().filter(|&&j| {
-                            (particles.particles[i].pred_pos - particles.particles[j].pred_pos)
-                                .length_squared()
-                                < H * H
-                        })),
-                        None => {}
+    particles.neighbors.clear();
+
+    let mut potential_neighbors = vec![];
+    for (key, is) in hashmap.iter() {
+        potential_neighbors.clear();
+        for x in key.0 - 1..key.0 + 2 {
+            for y in key.1 - 1..key.1 + 2 {
+                match hashmap.get(&(x, y)) {
+                    Some(js) => {
+                        potential_neighbors
+                            .extend(js.iter().map(|&j| (j, particles.particles[j].pred_pos)));
                     }
+                    None => {}
                 }
             }
+        }
+
+        for &i in is {
+            particles.particles[i].neighbors_start = particles.neighbors.len();
+            let i_pos = particles.particles[i].pred_pos;
+            for &(j, j_pos) in potential_neighbors.iter() {
+                if (i_pos - j_pos).length_squared() < H * H {
+                    particles.neighbors.push(j);
+                }
+            }
+            particles.particles[i].neighbors_end = particles.neighbors.len();
         }
     }
     span.exit();
@@ -175,9 +185,8 @@ pub(crate) fn particle_update(
         let span = info_span!("Iteration").entered();
         let span2 = info_span!("Calc lambdas").entered();
         for i in 0..N {
-            let denom = particles.particles[i]
-                .neighbors
-                .iter()
+            let denom = particles
+                .neighbors(i)
                 .map(|&j| particles.dCi2(i, j))
                 .sum::<f32>();
             particles.particles[i].lambda = -particles.Ci(i) / (2.0 * denom + EPS);
@@ -187,7 +196,7 @@ pub(crate) fn particle_update(
         let span2 = info_span!("Calc delta pos").entered();
         for i in 0..N {
             let mut delta_pos = Vec2::ZERO;
-            for &j in particles.particles[i].neighbors.iter() {
+            for &j in particles.neighbors(i) {
                 if j != i {
                     let dpos = particles.particles[i].pred_pos - particles.particles[j].pred_pos;
                     let scorr = -0.1 * f32::powi(Wpoly6(dpos) / Wpoly6(Vec2::new(0.0, 0.2 * H)), 4);
@@ -218,7 +227,7 @@ pub(crate) fn particle_update(
 
         let density_i = particles.density(i);
         // Vorticity and viscosity updates
-        for &j in particles.particles[i].neighbors.iter() {
+        for &j in particles.neighbors(i) {
             let dv = 1.0 / DT * (particles.particles[j].pred_pos - particles.particles[j].pos)
                 - 1.0 / DT * (particles.particles[i].pred_pos - particles.particles[i].pos);
             vel += DIFFUSION
@@ -241,7 +250,10 @@ pub(crate) fn particle_update(
         t.translation.y = particles.particles[i].pos.y;
         if i % 100 == 0 {
             // println!("{}", particles.density(i));
-            // println!("{}", particles.particles[i].neighbors.len());
+            // println!(
+            //     "{}",
+            //     particles.particles[i].neighbors_end - particles.particles[i].neighbors_start
+            // );
         }
     }
     span.exit();
