@@ -3,6 +3,7 @@ mod cells;
 mod chemistry;
 mod math_utils;
 mod parser;
+mod pbf;
 mod player;
 mod rules_asset;
 mod spells;
@@ -14,6 +15,7 @@ use bevy::{
 use bevy_rapier2d::prelude::*;
 use cells::*;
 use chemistry::*;
+use pbf::*;
 use player::{move_camera_system, move_player_system, spawn_player};
 use rules_asset::{RulesAsset, RulesAssetLoader};
 
@@ -38,10 +40,12 @@ fn main() {
         .add_asset::<RulesAsset>()
         .init_asset_loader::<RulesAssetLoader>()
         .add_startup_system(setup)
-        .add_startup_system(system_setup_block_grid)
-        .add_system(system_update_block_grid)
+        // .add_startup_system(system_setup_block_grid)
+        // .add_system(system_update_block_grid)
         .add_system(move_player_system)
         .add_system(move_camera_system)
+        .add_startup_system(particle_start)
+        .add_system(particle_update)
         .run();
 }
 

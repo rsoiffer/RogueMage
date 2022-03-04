@@ -273,7 +273,7 @@ lazy_static! {
                     Is(Material(*AIR)),
                     Adjacent,
                     Is(Material(*COAL)),
-                    not(Is(BlockProperty(BlockProperties::BURNING)))
+                    // not(Is(BlockProperty(BlockProperties::BURNING)))
                 ],
                 [Send(BlockProperty(BlockProperties::BURNING))]
             ),
@@ -283,8 +283,8 @@ lazy_static! {
             rate: 0.01,
             spell: basic(
                 [
+                    Is(BlockProperty(BlockProperties::BURNING)),
                     Is(Material(*COAL)),
-                    Is(BlockProperty(BlockProperties::BURNING))
                 ],
                 [Receive(BlockProperty(BlockProperties::BURNING))]
             )
@@ -294,8 +294,8 @@ lazy_static! {
             rate: 0.2,
             spell: basic(
                 [
-                    Is(Material(*COAL)),
                     Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Material(*COAL)),
                     Adjacent,
                     Is(Material(*AIR)),
                 ],
@@ -307,10 +307,10 @@ lazy_static! {
             rate: 0.005,
             spell: basic(
                 [
-                    Is(Material(*COAL)),
                     Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Material(*COAL)),
                 ],
-                [Send(Material(*SMOKE))]
+                [Send(Material(*SMOKE)), Receive(BlockProperty(BlockProperties::BURNING))]
             )
         },
         SpellRule {
@@ -320,17 +320,26 @@ lazy_static! {
         },
         SpellRule {
             name: "Fire and water combine to make air and steam",
-            rate: 1.0,
-            spell: Select(
-                bind([
+            rate: 0.1,
+            spell: basic(
+                [
                     Is(BlockProperty(BlockProperties::BURNING)),
-                    Is(Material(*AIR))
-                ]),
-                Box::new(merge(
-                    basic([], [Receive(BlockProperty(BlockProperties::BURNING))]),
-                    basic([Adjacent, Is(Material(*WATER))], [Send(Material(*STEAM))])
-                ))
-            )
+                    Is(Material(*AIR)),
+                    Adjacent,
+                    Is(Material(*WATER)),
+                ],
+                [Send(Material(*STEAM))]
+            ),
+            // spell: Select(
+            //     bind([
+            //         Is(BlockProperty(BlockProperties::BURNING)),
+            //         Is(Material(*AIR))
+            //     ]),
+            //     Box::new(merge(
+            //         basic([], [Receive(BlockProperty(BlockProperties::BURNING))]),
+            //         basic([Adjacent, Is(Material(*WATER))], [Send(Material(*STEAM))])
+            //     ))
+            // )
         },
         SpellRule {
             name: "Steam transforms into water over time",

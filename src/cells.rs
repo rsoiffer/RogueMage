@@ -19,7 +19,7 @@ use bevy::{
 use rand::seq::SliceRandom;
 
 /// The size of the whole grid of blocks
-const GRID_SIZE: usize = 512;
+const GRID_SIZE: usize = 128;
 
 pub(crate) struct BlockGrid {
     /// The 2d array of blocks
