@@ -11,8 +11,9 @@ use bevy::{
     utils::HashMap,
     window::Windows,
 };
+use noise::NoiseFn;
 
-const N: usize = 5000;
+const N: usize = 10000;
 const DT: f32 = 1.0 / 60.0;
 const H: f32 = 2.0;
 const RHO0: f32 = 1.0;
@@ -81,8 +82,8 @@ impl Constraint {
             Constraint::Collision(j) => {
                 let diff = particles.positions[i] - particles.positions[*j];
                 let density = 0.5 * particles.densities[i] + 0.5 * particles.densities[*j];
-                // let to_goal_density = f32::min(0.0, 1.0 - density / RHO0);
-                let to_goal_density = 1.0 - density / RHO0;
+                let to_goal_density = f32::min(0.0, 1.0 - density / RHO0);
+                // let to_goal_density = 1.0 - density / RHO0;
                 dWspiky(diff) * to_goal_density
                 // if diff.length_squared() < H * H {
                 //     0.5 * (H / diff.length() - 1.0) * diff
@@ -104,6 +105,7 @@ pub(crate) struct ParticleSprite;
 
 #[derive(Component)]
 pub(crate) struct ParticleList {
+    solid: Vec<bool>,
     positions: Vec<Vec2>,
     prev_positions: Vec<Vec2>,
     densities: Vec<f32>,
@@ -116,6 +118,7 @@ impl ParticleList {
         let task_pool_builder = TaskPoolBuilder::new();
         let task_pool = ComputeTaskPool(task_pool_builder.build());
         ParticleList {
+            solid: Default::default(),
             positions: Default::default(),
             prev_positions: Default::default(),
             densities: Default::default(),
@@ -125,6 +128,7 @@ impl ParticleList {
     }
 
     fn add(&mut self, pos: Vec2) {
+        self.solid.push(false);
         self.positions.push(pos);
         self.prev_positions.push(pos);
         self.densities.push(0.0);
@@ -178,11 +182,27 @@ impl ParticleList {
 
 pub(crate) fn particle_start(mut commands: Commands, asset_server: Res<AssetServer>) {
     let mut particles = ParticleList::new();
-    for i in 0..N {
+    for i in 0..5000 {
         particles.add(Vec2::new(
             SIM_SPACE * rand::random::<f32>(),
-            SIM_SPACE * rand::random::<f32>(),
+            SIM_SPACE * (0.5 + 0.5 * rand::random::<f32>()),
         ));
+    }
+    let simplex = noise::SuperSimplex::new();
+    for i in 5000..N {
+        loop {
+            let pos = Vec2::new(
+                SIM_SPACE * rand::random::<f32>(),
+                SIM_SPACE * (0.5 * rand::random::<f32>()),
+            );
+            let pos2 = pos / 10.0;
+            let noise = simplex.get([pos2.x as f64, pos2.y as f64]);
+            if noise > 0.3 {
+                particles.add(pos);
+                particles.solid[i] = true;
+                break;
+            }
+        }
     }
     commands.spawn().insert(particles);
 
@@ -237,7 +257,7 @@ fn get_cursor(
 
 pub(crate) fn particle_update(
     mut query: Query<&mut ParticleList>,
-    mut query2: Query<&mut Transform, With<ParticleSprite>>,
+    mut query2: Query<(&mut Transform, &mut Sprite), With<ParticleSprite>>,
     windows: Res<Windows>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
     // mut query: QuerySet<(
@@ -253,17 +273,21 @@ pub(crate) fn particle_update(
         nearby_particles.push(j);
     });
     for i in nearby_particles {
-        particles.apply_force(i, Vec2::new(100.0, 0.0));
+        if !particles.solid[i] {
+            particles.apply_force(i, Vec2::new(100.0, 0.0));
+        }
     }
 
     // Apply gravity
     let span = info_span!("Apply Gravity").entered();
     for i in 0..N {
-        particles.apply_force(i, Vec2::new(0.0, -40.0));
-        let vel = particles.vel(i);
-        if vel.length_squared() > MAX_VELOCITY * MAX_VELOCITY {
-            particles.prev_positions[i] =
-                particles.positions[i] - vel * DT * MAX_VELOCITY / vel.length();
+        if !particles.solid[i] {
+            particles.apply_force(i, Vec2::new(0.0, -40.0));
+            let vel = particles.vel(i);
+            if vel.length_squared() > MAX_VELOCITY * MAX_VELOCITY {
+                particles.prev_positions[i] =
+                    particles.positions[i] - vel * DT * MAX_VELOCITY / vel.length();
+            }
         }
     }
     span.exit();
@@ -281,12 +305,14 @@ pub(crate) fn particle_update(
     let span = info_span!("Find constraints").entered();
     let mut constraints = vec![vec![Constraint::StayInWorld()]; N];
     compute_parallel(&particles.task_pool, &mut constraints, &|i, c| {
-        let i_pos = particles.positions[i];
-        particles.nearby(i_pos, COLLISION_PADDING * H, &mut |j, j_pos| {
-            if i != j {
-                c.push(Constraint::Collision(j));
-            }
-        });
+        if !particles.solid[i] {
+            let i_pos = particles.positions[i];
+            particles.nearby(i_pos, COLLISION_PADDING * H, &mut |j, j_pos| {
+                if i != j {
+                    c.push(Constraint::Collision(j));
+                }
+            });
+        }
     });
     span.exit();
 
@@ -331,9 +357,15 @@ pub(crate) fn particle_update(
 
     // Update entities
     let span = info_span!("Update entities").entered();
-    for (i, mut t) in query2.iter_mut().enumerate() {
+    for (i, (mut t, mut sprite)) in query2.iter_mut().enumerate() {
         t.translation.x = particles.positions[i].x;
         t.translation.y = particles.positions[i].y;
+
+        sprite.color = if particles.solid[i] {
+            Color::rgb(0.5, 0.5, 0.5)
+        } else {
+            Color::rgb(0.2, 0.4, 1.0)
+        }
         // if i % 100 == 0 {
         //     println!(
         //         "{} -> {}",
