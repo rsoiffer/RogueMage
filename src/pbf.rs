@@ -2,57 +2,71 @@ use bevy::{
     math::Vec2,
     prelude::{info_span, AssetServer, Color, Commands, Component, Query, Res, Transform, With},
     sprite::{Sprite, SpriteBundle},
+    tasks::{ComputeTaskPool, TaskPoolBuilder},
     utils::HashMap,
 };
-use std::f32::consts::PI;
 
 const N: usize = 5000;
 const DT: f32 = 1.0 / 60.0;
-const RHO0: f32 = 1.0;
-const MASS: f32 = 1.0;
-const H: f32 = 2.0;
-const EPS: f32 = 1e-1;
-const DIFFUSION: f32 = 0.05;
-const ITERS: usize = 2;
+const H: f32 = 1.2;
+const ITERS: usize = 10;
+const STEP_SIZE: f32 = 0.25;
+const BETA_MUL: f32 = 1.0;
+const BETA_POW: f32 = 1.5;
+
+const ASYNC_CHUNK_SIZE: usize = 50;
 
 const SIM_SPACE: f32 = 100.0;
 
-fn Wpoly6(x: Vec2) -> f32 {
-    let r2 = x.length_squared();
-    if r2 < H * H {
-        4.0 / (PI * f32::powi(H, 8)) * f32::powi(H * H - r2, 3)
-    } else {
-        0.0
-    }
+fn grid_key(pos: Vec2) -> (i32, i32) {
+    ((pos.x / H).floor() as i32, (pos.y / H).floor() as i32)
 }
 
-fn Wspiky(x: Vec2) -> f32 {
-    let r = x.length();
-    if r < H {
-        10.0 / (PI * f32::powi(H, 5)) * f32::powi(H - r, 3)
-    } else {
-        0.0
-    }
+fn create_vec_parallel<F, T>(task_pool: &ComputeTaskPool, f: &F) -> Vec<T>
+where
+    F: Fn(usize) -> T + Sync,
+    T: Clone + Default + Send,
+{
+    let mut vec = vec![T::default(); N];
+    task_pool.scope(|s| {
+        let chunks = vec.chunks_mut(ASYNC_CHUNK_SIZE);
+        for (block, chunk) in chunks.enumerate() {
+            s.spawn(async move {
+                // let span = info_span!("Compute thread").entered();
+                for i in (block * ASYNC_CHUNK_SIZE)..((block + 1) * ASYNC_CHUNK_SIZE) {
+                    chunk[i % ASYNC_CHUNK_SIZE] = f(i);
+                }
+                // span.exit();
+            });
+        }
+    });
+    vec
 }
 
-fn dWspiky(x: Vec2) -> Vec2 {
-    let r = x.length();
-    if r < H && r > 1e-6 {
-        -30.0 / (PI * f32::powi(H, 5)) * f32::powi(H - r, 2) * x / r
-    } else {
-        Vec2::ZERO
-    }
+#[derive(Clone)]
+enum Constraint {
+    Collision(usize),
+    StayInWorld(),
 }
 
-#[derive(Default)]
-struct Particle {
-    pos: Vec2,
-    vel: Vec2,
-    pred_pos: Vec2,
-    delta_pos: Vec2,
-    lambda: f32,
-    neighbors_start: usize,
-    neighbors_end: usize,
+impl Constraint {
+    fn suggest_dp(&self, i: usize, positions: &Vec<Vec2>) -> Vec2 {
+        match self {
+            Constraint::Collision(j) => {
+                let diff = positions[i] - positions[*j];
+                if diff.length_squared() < H * H {
+                    0.5 * (H / diff.length() - 1.0) * diff
+                } else {
+                    Vec2::ZERO
+                }
+            }
+            Constraint::StayInWorld() => {
+                let pos = positions[i];
+                let nearest_in_world = pos.clamp(Vec2::splat(0.0), Vec2::splat(SIM_SPACE));
+                nearest_in_world - pos
+            }
+        }
+    }
 }
 
 #[derive(Component)]
@@ -60,52 +74,54 @@ pub(crate) struct ParticleSprite;
 
 #[derive(Component)]
 pub(crate) struct ParticleList {
-    particles: Vec<Particle>,
-    neighbors: Vec<usize>,
+    positions: Vec<Vec2>,
+    prev_positions: Vec<Vec2>,
+    delta: Vec<Vec2>,
+    task_pool: ComputeTaskPool,
 }
 
 impl ParticleList {
-    fn neighbors(&self, i: usize) -> impl Iterator<Item = &usize> {
-        let p = &self.particles[i];
-        self.neighbors[p.neighbors_start..p.neighbors_end].iter()
-    }
-
-    fn Ci(&self, i: usize) -> f32 {
-        self.density(i) / RHO0 - 1.0
-    }
-
-    fn dCi2(&self, i: usize, k: usize) -> f32 {
-        if i == k {
-            0.0
-        } else {
-            (dWspiky(self.particles[i].pred_pos - self.particles[k].pred_pos) / RHO0)
-                .length_squared()
+    fn new() -> ParticleList {
+        let task_pool_builder = TaskPoolBuilder::new();
+        let task_pool = ComputeTaskPool(task_pool_builder.build());
+        ParticleList {
+            positions: Default::default(),
+            prev_positions: Default::default(),
+            delta: Default::default(),
+            task_pool,
         }
     }
 
-    fn density(&self, i: usize) -> f32 {
-        let p1 = &self.particles[i];
-        self.neighbors(i)
-            .map(|&j| &self.particles[j])
-            .map(|p2| MASS * Wpoly6(p2.pred_pos - p1.pred_pos))
-            .sum()
+    fn add(&mut self, pos: Vec2) {
+        self.positions.push(pos);
+        self.prev_positions.push(pos);
+        self.delta.push(Vec2::ZERO);
+    }
+
+    fn apply_force(&mut self, i: usize, force: Vec2) {
+        self.prev_positions[i] = self.positions[i] - DT * (self.vel(i) + force * DT)
+    }
+
+    fn step(&mut self, i: usize) {
+        let step = self.positions[i] - self.prev_positions[i];
+        self.positions[i] += step;
+        self.prev_positions[i] += step;
+    }
+
+    fn vel(&self, i: usize) -> Vec2 {
+        1.0 / DT * (self.positions[i] - self.prev_positions[i])
     }
 }
 
 pub(crate) fn particle_start(mut commands: Commands, asset_server: Res<AssetServer>) {
-    let mut particles = vec![];
+    let mut particles = ParticleList::new();
     for i in 0..N {
-        let mut p = Particle::default();
-        p.pos = Vec2::new(
+        particles.add(Vec2::new(
             SIM_SPACE * rand::random::<f32>(),
             SIM_SPACE * rand::random::<f32>(),
-        );
-        particles.push(p);
+        ));
     }
-    commands.spawn().insert(ParticleList {
-        particles,
-        neighbors: vec![],
-    });
+    commands.spawn().insert(particles);
 
     for i in 0..N {
         commands
@@ -128,133 +144,86 @@ pub(crate) fn particle_update(
 ) {
     let mut particles = query.single_mut();
 
-    let span = info_span!("Stage 1").entered();
-    for p in particles.particles.iter_mut() {
-        p.vel += Vec2::new(0.0, -40.0 * DT);
-        p.pred_pos = p.pos + DT * p.vel;
+    // Step by velocity
+    let span = info_span!("Step by velocity").entered();
+    for i in 0..N {
+        particles.apply_force(i, Vec2::new(0.0, -40.0));
+        particles.step(i);
     }
     span.exit();
 
-    // Find neighbors
-    let span = info_span!("Make grid hashmap").entered();
+    // Build grid hashmap
+    let span = info_span!("Build grid hashmap").entered();
     let mut hashmap = HashMap::<(i32, i32), Vec<usize>>::default();
     for i in 0..N {
-        let p = &particles.particles[i];
-        let key = (
-            (p.pred_pos.x / H).floor() as i32,
-            (p.pred_pos.y / H).floor() as i32,
-        );
-        let e = hashmap.entry(key);
-        e.or_default().push(i);
+        let pos = particles.positions[i];
+        hashmap.entry(grid_key(pos)).or_default().push(i);
     }
     span.exit();
-    let span = info_span!("Find neighbors").entered();
-    particles.neighbors.clear();
 
-    let mut potential_neighbors = vec![];
-    for (key, is) in hashmap.iter() {
-        potential_neighbors.clear();
+    // Find constraints
+    let span = info_span!("Find constraints").entered();
+    let constraints = create_vec_parallel(&particles.task_pool, &|i| {
+        let mut c = vec![Constraint::StayInWorld()];
+        let i_pos = particles.positions[i];
+        let key = grid_key(i_pos);
         for x in key.0 - 1..key.0 + 2 {
             for y in key.1 - 1..key.1 + 2 {
                 match hashmap.get(&(x, y)) {
                     Some(js) => {
-                        potential_neighbors
-                            .extend(js.iter().map(|&j| (j, particles.particles[j].pred_pos)));
+                        for &j in js {
+                            let j_pos = particles.positions[j];
+                            if i != j && (i_pos - j_pos).length_squared() < 2.0 * H * H {
+                                c.push(Constraint::Collision(j));
+                            }
+                        }
                     }
                     None => {}
                 }
             }
         }
-
-        for &i in is {
-            particles.particles[i].neighbors_start = particles.neighbors.len();
-            let i_pos = particles.particles[i].pred_pos;
-            for &(j, j_pos) in potential_neighbors.iter() {
-                if (i_pos - j_pos).length_squared() < H * H {
-                    particles.neighbors.push(j);
-                }
-            }
-            particles.particles[i].neighbors_end = particles.neighbors.len();
-        }
-    }
+        c
+    });
     span.exit();
 
-    let span = info_span!("Solve pressure").entered();
-    // Solve pressure
+    // Solve constraints
+    let span = info_span!("Solve constraints").entered();
     for iter in 0..ITERS {
-        let span = info_span!("Iteration").entered();
-        let span2 = info_span!("Calc lambdas").entered();
-        for i in 0..N {
-            let denom = particles
-                .neighbors(i)
-                .map(|&j| particles.dCi2(i, j))
-                .sum::<f32>();
-            particles.particles[i].lambda = -particles.Ci(i) / (2.0 * denom + EPS);
-        }
-        span2.exit();
+        let beta = BETA_MUL * f32::powf(iter as f32 / ITERS as f32, BETA_POW);
 
+        // Calculate delta pos
         let span2 = info_span!("Calc delta pos").entered();
-        for i in 0..N {
-            let mut delta_pos = Vec2::ZERO;
-            for &j in particles.neighbors(i) {
-                if j != i {
-                    let dpos = particles.particles[i].pred_pos - particles.particles[j].pred_pos;
-                    let scorr = -0.1 * f32::powi(Wpoly6(dpos) / Wpoly6(Vec2::new(0.0, 0.2 * H)), 4);
-                    delta_pos +=
-                        (particles.particles[i].lambda + particles.particles[j].lambda + scorr)
-                            * dWspiky(dpos)
-                            / RHO0;
-                }
+        let dp = create_vec_parallel(&particles.task_pool, &|i| {
+            let mut new_dp = Vec2::ZERO;
+            for c in constraints[i].iter() {
+                new_dp += c.suggest_dp(i, &particles.positions);
             }
-            particles.particles[i].delta_pos = delta_pos;
-        }
+            new_dp
+        });
         span2.exit();
 
-        let span2 = info_span!("Update pred pos").entered();
-        for p in particles.particles.iter_mut() {
-            p.pred_pos += p.delta_pos;
-            p.pred_pos =
-                0.1 * p.pred_pos + 0.9 * p.pred_pos.clamp(Vec2::splat(0.0), Vec2::splat(SIM_SPACE))
+        // Update position
+        let span2 = info_span!("Update pos").entered();
+        for i in 0..N {
+            let step = STEP_SIZE * dp[i] + beta * particles.delta[i];
+            particles.delta[i] = step;
+            particles.positions[i] += step;
         }
         span2.exit();
-        span.exit();
     }
     span.exit();
 
-    let span = info_span!("Update velocity").entered();
-    for i in 0..N {
-        let mut vel = 1.0 / DT * (particles.particles[i].pred_pos - particles.particles[i].pos);
-
-        let density_i = particles.density(i);
-        // Vorticity and viscosity updates
-        for &j in particles.neighbors(i) {
-            let dv = 1.0 / DT * (particles.particles[j].pred_pos - particles.particles[j].pos)
-                - 1.0 / DT * (particles.particles[i].pred_pos - particles.particles[i].pos);
-            vel += DIFFUSION
-                * dv
-                * Wpoly6(particles.particles[j].pred_pos - particles.particles[i].pred_pos)
-                / density_i;
-        }
-
-        particles.particles[i].vel = vel;
-    }
-    span.exit();
-
-    let span = info_span!("End").entered();
-    for p in particles.particles.iter_mut() {
-        p.pos = p.pred_pos;
-    }
-
+    // Update entities
+    let span = info_span!("Update entities").entered();
     for (i, mut t) in query2.iter_mut().enumerate() {
-        t.translation.x = particles.particles[i].pos.x;
-        t.translation.y = particles.particles[i].pos.y;
-        if i % 100 == 0 {
-            // println!("{}", particles.density(i));
-            // println!(
-            //     "{}",
-            //     particles.particles[i].neighbors_end - particles.particles[i].neighbors_start
-            // );
-        }
+        t.translation.x = particles.positions[i].x;
+        t.translation.y = particles.positions[i].y;
+        // if i % 100 == 0 {
+        //     println!(
+        //         "{} -> {}",
+        //         particles.prev_positions[i], particles.positions[i]
+        //     );
+        // }
     }
     span.exit();
 }
