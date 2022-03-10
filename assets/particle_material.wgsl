@@ -127,6 +127,7 @@ struct Vertex {
 struct VertexOutput {
     [[builtin(position)]] clip_position: vec4<f32>;
     [[location(0)]] color: vec4<f32>;
+    [[location(1)]] uv: vec2<f32>;
 };
 
 [[stage(vertex)]]
@@ -137,10 +138,14 @@ fn vertex(vertex: Vertex) -> VertexOutput {
     var out: VertexOutput;
     out.clip_position = view.view_proj * world_position;
     out.color = vertex.i_color;
+    out.uv = vertex.uv;
     return out;
 }
 
 [[stage(fragment)]]
 fn fragment(in: VertexOutput) -> [[location(0)]] vec4<f32> {
+    if (distance(in.uv, vec2<f32>(0.5, 0.5)) > .5) {
+        return vec4<f32>(0.0, 0.0, 0.0, 0.0);
+    }
     return in.color;
 }
