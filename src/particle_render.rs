@@ -1,24 +1,38 @@
 use crate::particle_model::*;
 use bevy::{
-    ecs::system::{lifetimeless::SRes, SystemParamItem},
-    math::{Vec2, Vec4},
-    pbr::{Material, MaterialMeshBundle, MaterialPipeline},
-    prelude::{
-        info_span, shape, AssetServer, Assets, Camera, Color, Commands, Component, GlobalTransform,
-        Handle, Mesh, Query, Res, ResMut, Shader, Transform, With,
+    core::{FloatOrd, Pod, Zeroable},
+    core_pipeline::Transparent2d,
+    ecs::system::{
+        lifetimeless::{Read, SQuery, SRes},
+        SystemParamItem,
     },
-    reflect::TypeUuid,
+    math::{Vec2, Vec3},
+    prelude::{
+        info_span, shape, App, AssetServer, Assets, Camera, Color, Commands, Component,
+        ComputedVisibility, Entity, FromWorld, GlobalTransform, Handle, Mesh, Msaa, Plugin, Query,
+        Res, ResMut, Shader, Transform, Visibility, With, World,
+    },
     render::{
-        render_asset::{PrepareAssetError, RenderAsset},
+        mesh::GpuBufferInfo,
+        render_asset::RenderAssets,
+        render_component::{ExtractComponent, ExtractComponentPlugin},
+        render_phase::{
+            AddRenderCommand, DrawFunctions, EntityRenderCommand, RenderCommandResult, RenderPhase,
+            SetItemPipeline, TrackedRenderPass,
+        },
         render_resource::{
-            std140::{AsStd140, Std140},
-            BindGroup, BindGroupDescriptor, BindGroupEntry, BindGroupLayout,
-            BindGroupLayoutDescriptor, BindGroupLayoutEntry, BindingType, Buffer,
-            BufferBindingType, BufferInitDescriptor, BufferSize, BufferUsages, ShaderStages,
+            Buffer, BufferInitDescriptor, BufferUsages, PrimitiveTopology, RenderPipelineCache,
+            RenderPipelineDescriptor, SpecializedPipeline, SpecializedPipelines, VertexAttribute,
+            VertexBufferLayout, VertexFormat, VertexStepMode,
         },
         renderer::RenderDevice,
+        view::ExtractedView,
+        RenderApp, RenderStage,
     },
-    sprite::{Material2d, Material2dPipeline, MaterialMesh2dBundle, Mesh2dHandle},
+    sprite::{
+        Mesh2dHandle, Mesh2dPipeline, Mesh2dPipelineKey, Mesh2dUniform, SetMesh2dBindGroup,
+        SetMesh2dViewBindGroup,
+    },
     tasks::ComputeTaskPool,
     window::Windows,
 };
@@ -32,7 +46,7 @@ pub(crate) struct ParticleSprite;
 pub(crate) fn particle_start(
     mut commands: Commands,
     mut meshes: ResMut<Assets<Mesh>>,
-    mut materials: ResMut<Assets<CustomMaterial>>,
+    // mut materials: ResMut<Assets<CustomMaterial>>,
 ) {
     let mut particles = ParticleList::default();
     for i in 0..5000 {
@@ -61,17 +75,22 @@ pub(crate) fn particle_start(
     }
     commands.spawn().insert(particles);
 
-    let quad = Mesh2dHandle(meshes.add(Mesh::from(shape::Quad::new(Vec2::splat(1.0)))));
-    for i in 0..N {
-        commands
-            .spawn()
-            .insert_bundle(MaterialMesh2dBundle {
-                mesh: quad.clone(),
-                material: materials.add(CustomMaterial { color: Color::RED }),
-                ..Default::default()
-            })
-            .insert(ParticleSprite);
-    }
+    commands.spawn().insert_bundle((
+        Mesh2dHandle(meshes.add(Mesh::from(shape::Quad::new(Vec2::splat(1.0))))),
+        Transform::from_xyz(0.0, 0.0, 0.0),
+        GlobalTransform::default(),
+        InstanceMaterialData(
+            (0..N)
+                .map(|i| InstanceData {
+                    position: Vec3::splat(0.0),
+                    scale: 1.0,
+                    color: Color::WHITE.as_rgba_f32(),
+                })
+                .collect(),
+        ),
+        Visibility::default(),
+        ComputedVisibility::default(),
+    ));
 }
 
 fn get_cursor(
@@ -110,8 +129,9 @@ fn get_cursor(
 
 pub(crate) fn particle_update(
     mut query: Query<&mut ParticleList>,
-    mut query2: Query<(&mut Transform, &Handle<CustomMaterial>), With<ParticleSprite>>,
-    mut materials: ResMut<Assets<CustomMaterial>>,
+    mut query2: Query<&mut InstanceMaterialData>,
+    // mut query2: Query<(&mut Transform, &Handle<CustomMaterial>), With<ParticleSprite>>,
+    // mut materials: ResMut<Assets<CustomMaterial>>,
     windows: Res<Windows>,
     q_camera: Query<(&Camera, &GlobalTransform)>,
     task_pool: Res<ComputeTaskPool>,
@@ -138,22 +158,18 @@ pub(crate) fn particle_update(
 
     // Update entities
     let span = info_span!("Update entities").entered();
+    let instance_data = &mut query2.single_mut().0;
 
-    for ((mut t, material_handle), data) in query2.iter_mut().zip(particles.iter_all()) {
-        t.translation.x = data.pos.x;
-        t.translation.y = data.pos.y;
+    for (i, data) in instance_data.iter_mut().zip(particles.iter_all()) {
+        i.position.x = data.pos.x;
+        i.position.y = data.pos.y;
 
-        let new_color = if data.solid {
+        let color = if data.solid {
             Color::rgb(0.5, 0.5, 0.5)
         } else {
             Color::rgb(0.2, 0.4, 1.0)
         };
-
-        if materials.get(material_handle).unwrap().color == new_color {
-            continue;
-        }
-        let material = materials.get_mut(material_handle).unwrap();
-        material.color = new_color;
+        i.color = color.as_linear_rgba_f32();
 
         // if i % 100 == 0 {
         //     println!(
@@ -165,76 +181,202 @@ pub(crate) fn particle_update(
     span.exit();
 }
 
-// This is the struct that will be passed to your shader
-#[derive(Debug, Clone, TypeUuid)]
-#[uuid = "f690fdae-d598-45ab-8225-97e2a3f056e0"]
-pub struct CustomMaterial {
-    color: Color,
-}
+// I have no idea what's going on from here on down
 
-#[derive(Clone)]
-pub struct GpuCustomMaterial {
-    _buffer: Buffer,
-    bind_group: BindGroup,
-}
+#[derive(Component)]
+pub(crate) struct InstanceMaterialData(Vec<InstanceData>);
+impl ExtractComponent for InstanceMaterialData {
+    type Query = &'static InstanceMaterialData;
+    type Filter = ();
 
-// The implementation of [`Material`] needs this impl to work properly.
-impl RenderAsset for CustomMaterial {
-    type ExtractedAsset = CustomMaterial;
-    type PreparedAsset = GpuCustomMaterial;
-    type Param = (SRes<RenderDevice>, SRes<Material2dPipeline<Self>>);
-    fn extract_asset(&self) -> Self::ExtractedAsset {
-        self.clone()
+    fn extract_component(item: bevy::ecs::query::QueryItem<Self::Query>) -> Self {
+        InstanceMaterialData(item.0.clone())
     }
+}
 
-    fn prepare_asset(
-        extracted_asset: Self::ExtractedAsset,
-        (render_device, material_pipeline): &mut SystemParamItem<Self::Param>,
-    ) -> Result<Self::PreparedAsset, PrepareAssetError<Self::ExtractedAsset>> {
-        let color = Vec4::from_slice(&extracted_asset.color.as_linear_rgba_f32());
+pub struct CustomMaterialPlugin;
+
+impl Plugin for CustomMaterialPlugin {
+    fn build(&self, app: &mut App) {
+        app.add_plugin(ExtractComponentPlugin::<InstanceMaterialData>::default());
+        app.sub_app_mut(RenderApp)
+            .add_render_command::<Transparent2d, DrawCustom>()
+            .init_resource::<CustomPipeline>()
+            .init_resource::<SpecializedPipelines<CustomPipeline>>()
+            .add_system_to_stage(RenderStage::Queue, queue_custom)
+            .add_system_to_stage(RenderStage::Prepare, prepare_instance_buffers);
+    }
+}
+
+#[derive(Clone, Copy, Pod, Zeroable)]
+#[repr(C)]
+struct InstanceData {
+    position: Vec3,
+    scale: f32,
+    color: [f32; 4],
+}
+
+fn queue_custom(
+    transparent_2d_draw_functions: Res<DrawFunctions<Transparent2d>>,
+    custom_pipeline: Res<CustomPipeline>,
+    msaa: Res<Msaa>,
+    mut pipelines: ResMut<SpecializedPipelines<CustomPipeline>>,
+    mut pipeline_cache: ResMut<RenderPipelineCache>,
+    material_meshes: Query<
+        Entity,
+        // (Entity, &Mesh2dUniform),
+        (With<Mesh2dHandle>, With<InstanceMaterialData>),
+    >,
+    mut views: Query<(&ExtractedView, &mut RenderPhase<Transparent2d>)>,
+) {
+    let draw_custom = transparent_2d_draw_functions
+        .read()
+        .get_id::<DrawCustom>()
+        .unwrap();
+
+    let key = Mesh2dPipelineKey::from_msaa_samples(msaa.samples)
+        | Mesh2dPipelineKey::from_primitive_topology(PrimitiveTopology::TriangleList);
+    let pipeline = pipelines.specialize(&mut pipeline_cache, &custom_pipeline, key);
+
+    for (view, mut transparent_phase) in views.iter_mut() {
+        let view_matrix = view.transform.compute_matrix();
+        let view_row_2 = view_matrix.row(2);
+        for entity in material_meshes.iter() {
+            transparent_phase.add(Transparent2d {
+                // sort_key: FloatOrd(view_row_2.dot(mesh_uniform.transform.col(3))),
+                sort_key: FloatOrd(0.0),
+                entity,
+                pipeline,
+                draw_function: draw_custom,
+                batch_range: None,
+            });
+        }
+    }
+}
+
+#[derive(Component)]
+pub struct InstanceBuffer {
+    buffer: Buffer,
+    length: usize,
+}
+
+fn prepare_instance_buffers(
+    mut commands: Commands,
+    query: Query<(Entity, &InstanceMaterialData)>,
+    render_device: Res<RenderDevice>,
+) {
+    for (entity, instance_data) in query.iter() {
         let buffer = render_device.create_buffer_with_data(&BufferInitDescriptor {
-            contents: color.as_std140().as_bytes(),
-            label: None,
-            usage: BufferUsages::UNIFORM | BufferUsages::COPY_DST,
+            label: Some("instance data buffer"),
+            contents: bytemuck::cast_slice(instance_data.0.as_slice()),
+            usage: BufferUsages::VERTEX | BufferUsages::COPY_DST,
         });
-        let bind_group = render_device.create_bind_group(&BindGroupDescriptor {
-            entries: &[BindGroupEntry {
-                binding: 0,
-                resource: buffer.as_entire_binding(),
-            }],
-            label: None,
-            layout: &material_pipeline.material2d_layout,
+        commands.entity(entity).insert(InstanceBuffer {
+            buffer,
+            length: instance_data.0.len(),
         });
-
-        Ok(GpuCustomMaterial {
-            _buffer: buffer,
-            bind_group,
-        })
     }
 }
 
-impl Material2d for CustomMaterial {
-    fn fragment_shader(asset_server: &AssetServer) -> Option<Handle<Shader>> {
-        Some(asset_server.load("particle_material.wgsl"))
-    }
+pub struct CustomPipeline {
+    shader: Handle<Shader>,
+    mesh_pipeline: Mesh2dPipeline,
+}
 
-    fn bind_group(render_asset: &<Self as RenderAsset>::PreparedAsset) -> &BindGroup {
-        &render_asset.bind_group
-    }
+impl FromWorld for CustomPipeline {
+    fn from_world(world: &mut World) -> Self {
+        let world = world.cell();
+        let asset_server = world.get_resource::<AssetServer>().unwrap();
+        asset_server.watch_for_changes().unwrap();
+        let shader = asset_server.load("particle_material.wgsl");
 
-    fn bind_group_layout(render_device: &RenderDevice) -> BindGroupLayout {
-        render_device.create_bind_group_layout(&BindGroupLayoutDescriptor {
-            entries: &[BindGroupLayoutEntry {
-                binding: 0,
-                visibility: ShaderStages::FRAGMENT,
-                ty: BindingType::Buffer {
-                    ty: BufferBindingType::Uniform,
-                    has_dynamic_offset: false,
-                    min_binding_size: BufferSize::new(Vec4::std140_size_static() as u64),
+        let mesh_pipeline = world.get_resource::<Mesh2dPipeline>().unwrap();
+
+        CustomPipeline {
+            shader,
+            mesh_pipeline: mesh_pipeline.clone(),
+        }
+    }
+}
+
+impl SpecializedPipeline for CustomPipeline {
+    type Key = Mesh2dPipelineKey;
+
+    fn specialize(&self, key: Self::Key) -> RenderPipelineDescriptor {
+        let mut descriptor = self.mesh_pipeline.specialize(key);
+        descriptor.vertex.shader = self.shader.clone();
+        descriptor.vertex.buffers.push(VertexBufferLayout {
+            array_stride: std::mem::size_of::<InstanceData>() as u64,
+            step_mode: VertexStepMode::Instance,
+            attributes: vec![
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: 0,
+                    shader_location: 3, // shader locations 0-2 are taken up by Position, Normal and UV attributes
                 },
-                count: None,
-            }],
-            label: None,
-        })
+                VertexAttribute {
+                    format: VertexFormat::Float32x4,
+                    offset: VertexFormat::Float32x4.size(),
+                    shader_location: 4,
+                },
+            ],
+        });
+        descriptor.fragment.as_mut().unwrap().shader = self.shader.clone();
+        descriptor.layout = Some(vec![
+            self.mesh_pipeline.view_layout.clone(),
+            self.mesh_pipeline.mesh_layout.clone(),
+        ]);
+
+        descriptor
+    }
+}
+
+type DrawCustom = (
+    SetItemPipeline,
+    SetMesh2dViewBindGroup<0>,
+    SetMesh2dBindGroup<1>,
+    DrawMeshInstanced,
+);
+
+pub struct DrawMeshInstanced;
+impl EntityRenderCommand for DrawMeshInstanced {
+    type Param = (
+        SRes<RenderAssets<Mesh>>,
+        SQuery<Read<Mesh2dHandle>>,
+        SQuery<Read<InstanceBuffer>>,
+    );
+    #[inline]
+    fn render<'w>(
+        _view: Entity,
+        item: Entity,
+        (meshes, mesh_query, instance_buffer_query): SystemParamItem<'w, '_, Self::Param>,
+        pass: &mut TrackedRenderPass<'w>,
+    ) -> RenderCommandResult {
+        let mesh_handle = mesh_query.get(item).unwrap();
+        let instance_buffer = instance_buffer_query.get(item).unwrap();
+
+        let gpu_mesh = match meshes.into_inner().get(&mesh_handle.0) {
+            Some(gpu_mesh) => gpu_mesh,
+            None => return RenderCommandResult::Failure,
+        };
+
+        pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+        pass.set_vertex_buffer(1, instance_buffer.buffer.slice(..));
+
+        pass.set_vertex_buffer(0, gpu_mesh.vertex_buffer.slice(..));
+        match &gpu_mesh.buffer_info {
+            GpuBufferInfo::Indexed {
+                buffer,
+                index_format,
+                count,
+            } => {
+                pass.set_index_buffer(buffer.slice(..), 0, *index_format);
+                pass.draw_indexed(0..*count, 0, 0..instance_buffer.length as u32);
+            }
+            GpuBufferInfo::NonIndexed { vertex_count } => {
+                pass.draw_indexed(0..*vertex_count, 0, 0..instance_buffer.length as u32);
+            }
+        }
+        RenderCommandResult::Success
     }
 }

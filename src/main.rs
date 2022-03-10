@@ -12,7 +12,6 @@ mod spells;
 use bevy::{
     diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin},
     prelude::*,
-    sprite::Material2dPlugin,
 };
 use bevy_rapier2d::prelude::*;
 use cells::*;
@@ -33,7 +32,7 @@ fn main() {
         .add_plugin(LogDiagnosticsPlugin::default())
         .add_plugin(FrameTimeDiagnosticsPlugin::default())
         .add_plugin(RapierPhysicsPlugin::<NoUserData>::default())
-        .add_plugin(Material2dPlugin::<CustomMaterial>::default())
+        .add_plugin(CustomMaterialPlugin)
         .init_resource::<NaturalRules>()
         .insert_resource(ClearColor(Color::rgb(0.2, 0.2, 0.2)))
         .insert_resource(RapierConfiguration {
