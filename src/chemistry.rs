@@ -32,7 +32,6 @@ pub(crate) enum Property {
     Gravity,
     Floaty,
     Solid,
-    Powder,
     Liquid,
     Material(u16),
     BlockProperty(BlockProperties),

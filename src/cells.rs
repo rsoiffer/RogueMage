@@ -19,7 +19,7 @@ use bevy::{
 use rand::seq::SliceRandom;
 
 /// The size of the whole grid of blocks
-const GRID_SIZE: usize = 512;
+const GRID_SIZE: usize = 256;
 
 pub(crate) struct BlockGrid {
     /// The 2d array of blocks
@@ -163,14 +163,14 @@ impl BlockGrid {
 
 #[derive(Debug)]
 pub(crate) enum UpdateRule {
-    PowderUpdateRule,
+    GravityUpdateRule,
     LiquidUpdateRule,
     SpellUpdateRule(&'static SpellRule),
 }
 impl UpdateRule {
     fn only_run_on(&self) -> Property {
         match self {
-            UpdateRule::PowderUpdateRule => Powder,
+            UpdateRule::GravityUpdateRule => Liquid,
             UpdateRule::LiquidUpdateRule => Liquid,
             UpdateRule::SpellUpdateRule(sr) => match &sr.spell {
                 Spell::Select(selector, _) => match selector {
@@ -188,17 +188,54 @@ impl UpdateRule {
 
     fn update(&self, grid: &mut BlockGrid, x: i32, y: i32) {
         match self {
-            UpdateRule::PowderUpdateRule => self.powder_update(grid, x, y),
+            UpdateRule::GravityUpdateRule => self.gravity_update(grid, x, y),
             UpdateRule::LiquidUpdateRule => self.liquid_update(grid, x, y),
             UpdateRule::SpellUpdateRule(c) => self.spell_update(c, grid, x, y),
         }
     }
 
-    fn powder_update(&self, grid: &mut BlockGrid, x: i32, y: i32) {
+    fn gravity_update(&self, grid: &mut BlockGrid, x: i32, mut y: i32) {
         let mut block = grid.get(x, y).unwrap();
         let block_data = block.data();
-        if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Powder
+        if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Liquid
         {
+            return;
+        }
+
+        let down = if block_data.density >= 0.0 { -1 } else { 1 };
+        for i in 0..5 {
+            let y2 = y + down;
+            let block2 = grid.get(x, y2);
+            if block2.is_none() {
+                break;
+            }
+            let mut block2 = block2.unwrap();
+            let block2_data = block2.data();
+
+            let fall_desire = down as f32 * (block2_data.density - block_data.density);
+            if fall_desire <= 0.0 || i as f32 + rand::random::<f32>() > 2.0 * fall_desire {
+                break;
+            }
+
+            block.set(BlockProperties::MOVED_THIS_STEP, true);
+            if block2_data.physics != BlockPhysics::None {
+                block2.set(BlockProperties::MOVED_THIS_STEP, true);
+            }
+            grid.set(x, y, block2);
+            grid.set(x, y2, block);
+            self.mark_unstable(grid, x, y, block.id);
+            y += down;
+        }
+    }
+
+    fn liquid_update(&self, grid: &mut BlockGrid, x: i32, y: i32) {
+        let mut block = grid.get(x, y).unwrap();
+        let block_data = block.data();
+        // if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Liquid
+        // {
+        //     return;
+        // }
+        if block_data.physics != BlockPhysics::Liquid {
             return;
         }
 
@@ -208,23 +245,10 @@ impl UpdateRule {
         }
 
         if block.get(BlockProperties::POWDER_STABLE) {
-            let to_check = grid.neighbors(x, y, [0], [-1]);
-            self.powder_try_moves(grid, x, y, to_check);
-        } else {
-            let to_check = grid
-                .neighbors(x, y, [0], [-1])
-                .chain(grid.neighbors_shuffle(x, y, [-1, 1], [-1]))
-                .chain(grid.neighbors_shuffle(x, y, [-1, 1], [0]));
-            self.powder_try_moves(grid, x, y, to_check);
+            return;
         }
-    }
 
-    fn powder_try_moves<I>(&self, grid: &mut BlockGrid, x: i32, y: i32, to_check: I)
-    where
-        I: IntoIterator<Item = (i32, i32)>,
-    {
-        let mut block = grid.get(x, y).unwrap();
-        let block_data = block.data();
+        let to_check = grid.neighbors_shuffle(x, y, [-1, 1], [0]);
         for (x2, y2) in to_check {
             let block2 = grid.get(x2, y2);
             if block2.is_none() {
@@ -232,8 +256,12 @@ impl UpdateRule {
             }
             let mut block2 = block2.unwrap();
             let block2_data = block2.data();
+
+            let density_advantage = block_data.density - block2_data.density;
+
             if block2.get(BlockProperties::MOVED_THIS_STEP)
-                || block2_data.density >= block_data.density
+                || (density_advantage <= 0.0 && block2_data.physics != BlockPhysics::None)
+                || f32::abs(density_advantage) <= 1.0 * rand::random::<f32>()
             {
                 continue;
             }
@@ -245,54 +273,24 @@ impl UpdateRule {
             grid.set(x, y, block2);
             grid.set(x2, y2, block);
 
-            for (x3, y3) in grid.neighbors(x, y, -1..2, -1..2) {
-                let block3 = grid.get(x3, y3);
-                if block3.is_none() {
-                    continue;
-                }
-                let mut block3 = block3.unwrap();
-                if block3.data().physics == BlockPhysics::Powder {
-                    block3.set(BlockProperties::POWDER_STABLE, false);
-                    grid.set(x3, y3, block3);
-                }
-            }
+            self.mark_unstable(grid, x, y, block.id);
             return;
         }
     }
 
-    fn liquid_update(&self, grid: &mut BlockGrid, x: i32, y: i32) {
-        let mut block = grid.get(x, y).unwrap();
-        let block_data = block.data();
-        if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Liquid
-        {
-            return;
-        }
-
-        let down = if block_data.density >= 0.1 { -1 } else { 1 };
-        let to_check = grid
-            .neighbors_shuffle(x, y, -1..2, [down])
-            .into_iter()
-            .chain(grid.neighbors_shuffle(x, y, [-1, 1], [0]));
-        for (x2, y2) in to_check {
-            let block2 = grid.get(x2, y2);
-            if block2.is_none() {
+    fn mark_unstable(&self, grid: &mut BlockGrid, x: i32, y: i32, id: u16) {
+        for (x3, y3) in grid.neighbors(x, y, -1..2, -1..2) {
+            let block3 = grid.get(x3, y3);
+            if block3.is_none() {
                 continue;
             }
-            let mut block2 = block2.unwrap();
-            let block2_data = block2.data();
-            if block2.get(BlockProperties::MOVED_THIS_STEP)
-                || down as f32 * (block2_data.density - block_data.density) <= 0.0
-            {
-                continue;
-            }
+            let mut block3 = block3.unwrap();
+            let block3_data = block3.data();
 
-            block.set(BlockProperties::MOVED_THIS_STEP, true);
-            if block2_data.physics != BlockPhysics::None {
-                block2.set(BlockProperties::MOVED_THIS_STEP, true);
+            if block3_data.physics == BlockPhysics::Liquid && block3.id == id {
+                block3.set(BlockProperties::POWDER_STABLE, false);
+                grid.set(x3, y3, block3);
             }
-            grid.set(x, y, block2);
-            grid.set(x2, y2, block);
-            return;
         }
     }
 
@@ -374,6 +372,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     block_grid.set_range_func(65..70, 0..5, |block| {
         block.set(BlockProperties::BURNING, true)
     });
+    block_grid.set_range(175..230, 5..225, *WATER);
 
     let mut texture = Image::new_fill(
         Extent3d {
@@ -393,7 +392,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     let texture_handle = textures.add(texture);
 
     let mut update_rules: Vec<UpdateRule> =
-        vec![UpdateRule::PowderUpdateRule, UpdateRule::LiquidUpdateRule];
+        vec![UpdateRule::GravityUpdateRule, UpdateRule::LiquidUpdateRule];
     for r in NATURAL_RULES.iter() {
         update_rules.push(UpdateRule::SpellUpdateRule(r));
     }

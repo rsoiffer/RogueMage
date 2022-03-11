@@ -32,7 +32,7 @@ impl BlockProperties {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct Block {
     /// The index into the block definitions array
-    id: u16,
+    pub(crate) id: u16,
     /// Used to vary colors among blocks of the same type
     color_seed: u8,
     /// Reserved for future use
@@ -108,11 +108,6 @@ impl Block {
                     None
                 }
             }))
-            .chain(if self.data().physics == BlockPhysics::Powder {
-                Some(Property::Powder)
-            } else {
-                None
-            })
             .chain(if self.data().physics == BlockPhysics::Liquid {
                 Some(Property::Liquid)
             } else {
@@ -127,9 +122,7 @@ pub(crate) enum BlockPhysics {
     None,
     /// Doesn't move, can't be pushed around
     Solid,
-    /// Forms into piles, has friction
-    Powder,
-    /// Frictionless liquids and gasses
+    /// Moving powders, liquids, and gasses
     Liquid,
 }
 
@@ -159,7 +152,7 @@ lazy_static! {
             name: "Air",
             color1: Color::rgba(0.0, 0.0, 0.0, 0.0),
             color2: Color::rgba(0.0, 0.0, 0.0, 0.0),
-            density: 0.1,
+            density: 0.0,
             physics: BlockPhysics::None,
             powder_stability: 0.0,
         },
@@ -167,7 +160,7 @@ lazy_static! {
             name: "Stone",
             color1: Color::rgb(0.5, 0.5, 0.5),
             color2: Color::rgb(0.3, 0.3, 0.3),
-            density: 1.0,
+            density: 3.3,
             physics: BlockPhysics::Solid,
             powder_stability: 0.0,
         },
@@ -175,7 +168,7 @@ lazy_static! {
             name: "Water",
             color1: Color::rgba(0.2, 0.4, 1.0, 0.7),
             color2: Color::rgba(0.2, 0.4, 1.0, 0.7),
-            density: 0.5,
+            density: 2.9,
             physics: BlockPhysics::Liquid,
             powder_stability: 0.0,
         },
@@ -183,15 +176,15 @@ lazy_static! {
             name: "Sand",
             color1: Color::rgb(1.0, 0.8, 0.3),
             color2: Color::rgb(0.8, 0.6, 0.2),
-            density: 0.8,
-            physics: BlockPhysics::Powder,
+            density: 3.3,
+            physics: BlockPhysics::Liquid,
             powder_stability: 0.3,
         },
         BlockData {
             name: "Wood",
             color1: Color::rgb(0.8, 0.4, 0.3),
             color2: Color::rgb(0.6, 0.2, 0.2),
-            density: 1.0,
+            density: 2.7,
             physics: BlockPhysics::Solid,
             powder_stability: 0.0,
         },
@@ -199,15 +192,15 @@ lazy_static! {
             name: "Coal",
             color1: Color::rgb(0.2, 0.2, 0.2),
             color2: Color::rgb(0.1, 0.1, 0.1),
-            density: 1.0,
-            physics: BlockPhysics::Powder,
-            powder_stability: 0.7,
+            density: 3.0,
+            physics: BlockPhysics::Liquid,
+            powder_stability: 0.5,
         },
         BlockData {
             name: "Fire",
             color1: Color::rgb(1.0, 1.0, 0.4),
             color2: Color::rgb(1.0, 0.3, 0.0),
-            density: 0.1,
+            density: 0.0,
             physics: BlockPhysics::None,
             powder_stability: 0.0,
         },
@@ -215,7 +208,7 @@ lazy_static! {
             name: "Smoke",
             color1: Color::rgba(0.1, 0.1, 0.1, 0.5),
             color2: Color::rgba(0.2, 0.2, 0.2, 0.2),
-            density: 0.05,
+            density: -0.6,
             physics: BlockPhysics::Liquid,
             powder_stability: 0.0,
         },
@@ -223,7 +216,7 @@ lazy_static! {
             name: "Steam",
             color1: Color::rgba(1.0, 1.0, 1.0, 0.3),
             color2: Color::rgba(1.0, 1.0, 1.0, 0.1),
-            density: 0.05,
+            density: -0.3,
             physics: BlockPhysics::Liquid,
             powder_stability: 0.0,
         },

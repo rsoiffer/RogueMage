@@ -315,26 +315,39 @@ lazy_static! {
         },
         SpellRule {
             name: "Smoke disappears over time",
-            rate: 0.002,
+            rate: 0.001,
             spell: basic([Is(Material(*SMOKE))], [Send(Material(*AIR))])
         },
+        // SpellRule {
+        //     name: "Fire and water combine to make air and steam",
+        //     rate: 1.0,
+        //     spell: Select(
+        //         bind([
+        //             Is(BlockProperty(BlockProperties::BURNING)),
+        //             Is(Material(*AIR))
+        //         ]),
+        //         Box::new(merge(
+        //             basic([], [Receive(BlockProperty(BlockProperties::BURNING))]),
+        //             basic([Adjacent, Is(Material(*WATER))], [Send(Material(*STEAM))])
+        //         ))
+        //     )
+        // },
         SpellRule {
-            name: "Fire and water combine to make air and steam",
-            rate: 1.0,
-            spell: Select(
-                bind([
+            name: "Fire turns water into steam",
+            rate: 0.02,
+            spell: basic(
+                [
                     Is(BlockProperty(BlockProperties::BURNING)),
-                    Is(Material(*AIR))
-                ]),
-                Box::new(merge(
-                    basic([], [Receive(BlockProperty(BlockProperties::BURNING))]),
-                    basic([Adjacent, Is(Material(*WATER))], [Send(Material(*STEAM))])
-                ))
-            )
+                    Is(Material(*AIR)),
+                    Adjacent,
+                    Is(Material(*WATER)),
+                ],
+                [Send(Material(*STEAM))]
+            ),
         },
         SpellRule {
             name: "Steam transforms into water over time",
-            rate: 0.002,
+            rate: 0.001,
             spell: basic([Is(Material(*STEAM))], [Send(Material(*WATER))])
         },
     ];
