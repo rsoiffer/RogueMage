@@ -194,7 +194,7 @@ lazy_static! {
             color2: Color::rgb(0.1, 0.1, 0.1),
             density: 3.0,
             physics: BlockPhysics::Liquid,
-            powder_stability: 0.5,
+            powder_stability: 0.7,
         },
         BlockData {
             name: "Fire",

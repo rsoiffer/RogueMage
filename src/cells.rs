@@ -372,7 +372,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     block_grid.set_range_func(65..70, 0..5, |block| {
         block.set(BlockProperties::BURNING, true)
     });
-    block_grid.set_range(175..230, 5..225, *WATER);
+    block_grid.set_range(135..230, 15..225, *WATER);
 
     let mut texture = Image::new_fill(
         Extent3d {
