@@ -244,7 +244,8 @@ lazy_static! {
             spell: basic(
                 [
                     Is(Stored(Burning)),
-                    Is(Material(*AIR))
+                    not(Is(Material(*COAL))),
+                    // Is(Material(*AIR))
                 ],
                 [Receive(Stored(Burning))]
             )

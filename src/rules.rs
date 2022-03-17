@@ -85,6 +85,8 @@ fn gravity_update(info: &mut WorldInfo, target: Target) {
         }
         info.set_block(x, y, block2);
         info.set_block(x, y2, block);
+        info.swap_properties(Target::Block(x, y), Target::Block(x, y2));
+
         mark_unstable(info, x, y, block.id);
         y += down;
     }
@@ -139,6 +141,7 @@ fn liquid_update(info: &mut WorldInfo, target: Target) {
         }
         info.set_block(x, y, block2);
         info.set_block(x2, y2, block);
+        info.swap_properties(Target::Block(x, y), Target::Block(x2, y2));
 
         mark_unstable(info, x, y, block.id);
         return;

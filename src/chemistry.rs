@@ -37,7 +37,7 @@ pub(crate) struct WorldInfo {
     /// The grid of blocks in the world
     blocks: BlockGrid,
     /// Stores the value of every property on every target
-    properties: HashMap<(Target, StoredProperty), f32>,
+    properties: HashMap<Target, HashMap<StoredProperty, f32>>,
     /// Stores a set of active target with each property
     active: HashMap<Property, HashSet<Target>>,
     /// The set of targets that have changed so far this step
@@ -57,7 +57,8 @@ impl WorldInfo {
             (Entity(e), Material(id)) => todo!(),
             (target, Stored(property)) => self
                 .properties
-                .get(&(target, property))
+                .get(&target)
+                .and_then(|m| m.get(&property))
                 .cloned()
                 .unwrap_or_default(),
             (target, Dependent(property)) => todo!(),
@@ -65,26 +66,61 @@ impl WorldInfo {
     }
 
     pub(crate) fn set(&mut self, target: Target, property: StoredProperty, value: f32) {
-        let old_value = self
-            .properties
-            .get(&(target, property))
-            .cloned()
-            .unwrap_or_default();
+        let properties = self.properties.entry(target).or_default();
+        let old_value = properties.get(&property).cloned().unwrap_or_default();
         if old_value != value {
             if value == 0.0 {
-                self.properties.remove(&(target, property));
+                properties.remove(&property);
                 self.active
                     .entry(Stored(property))
                     .or_default()
                     .remove(&target);
             } else {
-                self.properties.insert((target, property), value);
+                properties.insert(property, value);
                 self.active
                     .entry(Stored(property))
                     .or_default()
                     .insert(target);
             }
             self.changed.insert(target);
+        }
+    }
+
+    pub(crate) fn swap_properties(&mut self, target1: Target, target2: Target) {
+        let properties1 = self.properties.remove(&target1);
+        let properties2 = self.properties.remove(&target2);
+
+        for &property in properties1.iter().flat_map(|m| m.keys()) {
+            self.active
+                .entry(Stored(property))
+                .or_default()
+                .remove(&target1);
+        }
+        for &property in properties2.iter().flat_map(|m| m.keys()) {
+            self.active
+                .entry(Stored(property))
+                .or_default()
+                .remove(&target2);
+        }
+
+        for &property in properties1.iter().flat_map(|m| m.keys()) {
+            self.active
+                .entry(Stored(property))
+                .or_default()
+                .insert(target2);
+        }
+        for &property in properties2.iter().flat_map(|m| m.keys()) {
+            self.active
+                .entry(Stored(property))
+                .or_default()
+                .insert(target1);
+        }
+
+        for properties1 in properties1 {
+            self.properties.insert(target2, properties1);
+        }
+        for properties2 in properties2 {
+            self.properties.insert(target1, properties2);
         }
     }
 
