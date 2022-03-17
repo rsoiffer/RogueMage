@@ -10,7 +10,7 @@ use SpellSelector::*;
 use Target::*;
 
 impl Target {
-    fn for_each_adjacent<F: FnMut(Target)>(&self, mut f: F) {
+    fn for_each_adjacent<F: FnMut(Target)>(&self, info: &WorldInfo, mut f: F) {
         match self {
             Block(x, y) => {
                 for x2 in -1..2 {
@@ -27,7 +27,7 @@ impl Target {
                     }
                 }
             }
-            _ => {}
+            _ => todo!(),
         }
     }
 }
@@ -49,7 +49,6 @@ impl SpellTarget {
 
 #[derive(Debug)]
 pub(crate) enum SpellSelector {
-    Identity,
     Adjacent,
     Is(Property),
     Not(Box<SpellSelector>),
@@ -59,8 +58,7 @@ pub(crate) enum SpellSelector {
 impl SpellSelector {
     fn select(&self, info: &WorldInfo, target: Target, f: &mut dyn FnMut(SpellTarget)) {
         match self {
-            Identity => f(SpellTarget::new(target)),
-            Adjacent => target.for_each_adjacent(|a| f(SpellTarget::new(a))),
+            Adjacent => target.for_each_adjacent(info, |a| f(SpellTarget::new(a))),
             Is(property) => {
                 if info.get(target, *property) != 0.0 {
                     f(SpellTarget::new(target))
@@ -114,7 +112,7 @@ where
         .into_iter()
         .rev()
         .reduce(|acc, item| Bind(Box::new(item), Box::new(acc)))
-        .unwrap_or(Identity)
+        .unwrap()
 }
 
 fn not(spell: SpellSelector) -> SpellSelector {
@@ -148,7 +146,6 @@ pub(crate) struct SpellResult<'a> {
 pub(crate) enum Spell {
     Effects(Vec<SpellEffect>),
     Select(SpellSelector, Box<Spell>),
-    Merge(Box<Spell>, Box<Spell>),
 }
 
 impl Spell {
@@ -161,45 +158,6 @@ impl Spell {
         match self {
             Effects(effects) => f(SpellResult { target, effects }),
             Select(selector, spell) => Spell::cast_select(info, target, selector, spell, f),
-            Merge(spell1, spell2) => {
-                let (mut results1, mut results2) = Spell::merge(info, target, spell1, spell2);
-                for r in results1.drain(..) {
-                    f(r);
-                }
-                for r in results2.drain(..) {
-                    f(r);
-                }
-            }
-        }
-    }
-
-    fn merge<'a>(
-        info: &WorldInfo,
-        target: SpellTarget,
-        spell1: &'a Box<Spell>,
-        spell2: &'a Box<Spell>,
-    ) -> (Vec<SpellResult<'a>>, Vec<SpellResult<'a>>) {
-        let mut results1 = vec![];
-        let mut results2 = vec![];
-        spell1.cast(info, target, &mut |t| results1.push(t));
-        spell2.cast(info, target, &mut |t| results2.push(t));
-
-        let connection1 = results1.iter().map(|r| r.target.connection).sum::<f32>();
-        let connection2 = results2.iter().map(|r| r.target.connection).sum::<f32>();
-        let min_connection = f32::min(connection1, connection2);
-
-        if min_connection < 1e-6 {
-            (vec![], vec![])
-        } else {
-            for r in results1.iter_mut() {
-                r.target.connection *= min_connection / connection1;
-            }
-
-            for r in results2.iter_mut() {
-                r.target.connection *= min_connection / connection2;
-            }
-
-            (results1, results2)
         }
     }
 
@@ -223,10 +181,6 @@ where
         bind(selectors),
         Box::new(Effects(effects.into_iter().collect::<Vec<_>>())),
     )
-}
-
-fn merge(spell1: Spell, spell2: Spell) -> Spell {
-    Merge(Box::new(spell1), Box::new(spell2))
 }
 
 #[derive(Debug)]
@@ -304,20 +258,6 @@ lazy_static! {
             rate: 0.001,
             spell: basic([Is(Material(*SMOKE))], [Send(Material(*AIR))])
         },
-        // SpellRule {
-        //     name: "Fire and water combine to make air and steam",
-        //     rate: 1.0,
-        //     spell: Select(
-        //         bind([
-        //             Is(Stored(Burning)),
-        //             Is(Material(*AIR))
-        //         ]),
-        //         Box::new(merge(
-        //             basic([], [Receive(Stored(Burning))]),
-        //             basic([Adjacent, Is(Material(*WATER))], [Send(Material(*STEAM))])
-        //         ))
-        //     )
-        // },
         SpellRule {
             name: "Fire turns water into steam",
             rate: 0.02,
