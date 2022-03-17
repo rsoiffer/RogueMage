@@ -1,3 +1,5 @@
+use crate::chemistry::DependentProperty::*;
+use crate::chemistry::Property::*;
 use crate::chemistry::*;
 use bevy::prelude::Color;
 use bitflags::bitflags;
@@ -10,10 +12,8 @@ bitflags! {
         const MOVED_THIS_STEP = 1 << 0;
         /// Has this block settled into a stable state - can only be true for powders
         const POWDER_STABLE = 1 << 1;
-        /// Is this block currently on fire
-        const BURNING = 1 << 2;
         /// Has this block changed at all this step
-        const CHANGED_THIS_STEP = 1 << 3;
+        const CHANGED_THIS_STEP = 1 << 2;
     }
 }
 
@@ -22,7 +22,6 @@ impl BlockProperties {
         [
             BlockProperties::MOVED_THIS_STEP,
             BlockProperties::POWDER_STABLE,
-            BlockProperties::BURNING,
             BlockProperties::CHANGED_THIS_STEP,
         ]
         .into_iter()
@@ -70,26 +69,6 @@ impl Block {
         ALL_BLOCK_DATA.get(self.id as usize).unwrap()
     }
 
-    pub(crate) fn get_prop(&self, property: Property) -> f32 {
-        match property {
-            Property::Material(id) => {
-                if self.id == id {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            Property::BlockProperty(property) => {
-                if self.get(property) {
-                    1.0
-                } else {
-                    0.0
-                }
-            }
-            _ => todo!(),
-        }
-    }
-
     pub(crate) fn get(&self, property: BlockProperties) -> bool {
         self.stored_properties.contains(property)
     }
@@ -109,7 +88,7 @@ impl Block {
                 }
             }))
             .chain(if self.data().physics == BlockPhysics::Liquid {
-                Some(Property::Liquid)
+                Some(Dependent(Liquid))
             } else {
                 None
             })

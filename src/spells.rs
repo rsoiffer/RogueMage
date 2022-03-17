@@ -1,6 +1,7 @@
 use crate::blocks::*;
 use crate::cells::*;
 use crate::chemistry::Property::*;
+use crate::chemistry::StoredProperty::*;
 use crate::chemistry::*;
 use bevy::prelude::Entity;
 use lazy_static::lazy_static;
@@ -9,15 +10,10 @@ use SpellEffect::*;
 use SpellSelector::*;
 use Target::*;
 
-pub(crate) struct WorldInfo<'a> {
-    pub(crate) grid: &'a BlockGrid,
-}
-
 #[derive(Clone, Copy, Debug)]
 pub(crate) enum Target {
     Block(i32, i32),
     Entity(Entity),
-    NewSummon,
 }
 
 impl Target {
@@ -33,16 +29,6 @@ impl Target {
                 }
             }
             _ => {}
-        }
-    }
-
-    fn get(self, info: &WorldInfo, property: Property) -> f32 {
-        match self {
-            Block(x, y) => match info.grid.get(x, y) {
-                Some(block) => block.get_prop(property),
-                None => 0.0,
-            },
-            _ => todo!(),
         }
     }
 }
@@ -77,7 +63,7 @@ impl SpellSelector {
             Identity => f(SpellTarget::new(target)),
             Adjacent => target.for_each_adjacent(|a| f(SpellTarget::new(a))),
             Is(property) => {
-                if target.get(info, *property) != 0.0 {
+                if info.get(target, *property) != 0.0 {
                     f(SpellTarget::new(target))
                 }
             }
@@ -258,24 +244,24 @@ lazy_static! {
             rate: 0.03,
             spell: basic(
                 [
-                    Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Stored(Burning)),
                     Is(Material(*AIR))
                 ],
-                [Receive(BlockProperty(BlockProperties::BURNING))]
+                [Receive(Stored(Burning))]
             )
         },
         SpellRule {
-            name: "Fire makes coal start burning",
+            name: "Fire makes coal start Stored(Burning)",
             rate: 0.2,
             spell: basic(
                 [
-                    Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Stored(Burning)),
                     Is(Material(*AIR)),
                     Adjacent,
                     Is(Material(*COAL)),
-                    not(Is(BlockProperty(BlockProperties::BURNING)))
+                    not(Is(Stored(Burning)))
                 ],
-                [Send(BlockProperty(BlockProperties::BURNING))]
+                [Send(Stored(Burning))]
             ),
         },
         SpellRule {
@@ -284,31 +270,31 @@ lazy_static! {
             spell: basic(
                 [
                     Is(Material(*COAL)),
-                    Is(BlockProperty(BlockProperties::BURNING))
+                    Is(Stored(Burning))
                 ],
-                [Receive(BlockProperty(BlockProperties::BURNING))]
+                [Receive(Stored(Burning))]
             )
         },
         SpellRule {
-            name: "Burning coal lights the air around it on fire",
+            name: "Stored(Burning) coal lights the air around it on fire",
             rate: 0.2,
             spell: basic(
                 [
                     Is(Material(*COAL)),
-                    Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Stored(Burning)),
                     Adjacent,
                     Is(Material(*AIR)),
                 ],
-                [Send(BlockProperty(BlockProperties::BURNING))]
+                [Send(Stored(Burning))]
             )
         },
         SpellRule {
-            name: "Burning coal transforms into smoke",
+            name: "Stored(Burning) coal transforms into smoke",
             rate: 0.005,
             spell: basic(
                 [
                     Is(Material(*COAL)),
-                    Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Stored(Burning)),
                 ],
                 [Send(Material(*SMOKE))]
             )
@@ -323,11 +309,11 @@ lazy_static! {
         //     rate: 1.0,
         //     spell: Select(
         //         bind([
-        //             Is(BlockProperty(BlockProperties::BURNING)),
+        //             Is(Stored(Burning)),
         //             Is(Material(*AIR))
         //         ]),
         //         Box::new(merge(
-        //             basic([], [Receive(BlockProperty(BlockProperties::BURNING))]),
+        //             basic([], [Receive(Stored(Burning))]),
         //             basic([Adjacent, Is(Material(*WATER))], [Send(Material(*STEAM))])
         //         ))
         //     )
@@ -337,7 +323,7 @@ lazy_static! {
             rate: 0.02,
             spell: basic(
                 [
-                    Is(BlockProperty(BlockProperties::BURNING)),
+                    Is(Stored(Burning)),
                     Is(Material(*AIR)),
                     Adjacent,
                     Is(Material(*WATER)),
