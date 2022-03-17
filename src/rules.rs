@@ -43,17 +43,22 @@ impl UpdateRule {
         }
     }
 
-    fn update(&self, info: &mut WorldInfo, x: i32, y: i32) {
+    fn update(&self, info: &mut WorldInfo, target: Target) {
         match self {
-            UpdateRule::GravityUpdateRule => gravity_update(&mut info.grid, x, y),
-            UpdateRule::LiquidUpdateRule => liquid_update(&mut info.grid, x, y),
-            UpdateRule::SpellUpdateRule(c) => spell_update(c, info, x, y),
+            UpdateRule::GravityUpdateRule => gravity_update(info, target),
+            UpdateRule::LiquidUpdateRule => liquid_update(info, target),
+            UpdateRule::SpellUpdateRule(c) => spell_update(c, info, target),
         }
     }
 }
 
-fn gravity_update(grid: &mut BlockGrid, x: i32, mut y: i32) {
-    let mut block = grid.get(x, y).unwrap();
+fn gravity_update(info: &mut WorldInfo, target: Target) {
+    let (x, mut y) = match target {
+        Target::Block(x, y) => (x, y),
+        _ => todo!(),
+    };
+
+    let mut block = info.get_block(x, y).unwrap();
     let block_data = block.data();
     if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Liquid {
         return;
@@ -62,7 +67,7 @@ fn gravity_update(grid: &mut BlockGrid, x: i32, mut y: i32) {
     let down = if block_data.density >= 0.0 { -1 } else { 1 };
     for i in 0..5 {
         let y2 = y + down;
-        let block2 = grid.get(x, y2);
+        let block2 = info.get_block(x, y2);
         if block2.is_none() {
             break;
         }
@@ -78,15 +83,20 @@ fn gravity_update(grid: &mut BlockGrid, x: i32, mut y: i32) {
         if block2_data.physics != BlockPhysics::None {
             block2.set(BlockProperties::MOVED_THIS_STEP, true);
         }
-        grid.set(x, y, block2);
-        grid.set(x, y2, block);
-        mark_unstable(grid, x, y, block.id);
+        info.set_block(x, y, block2);
+        info.set_block(x, y2, block);
+        mark_unstable(info, x, y, block.id);
         y += down;
     }
 }
 
-fn liquid_update(grid: &mut BlockGrid, x: i32, y: i32) {
-    let mut block = grid.get(x, y).unwrap();
+fn liquid_update(info: &mut WorldInfo, target: Target) {
+    let (x, y) = match target {
+        Target::Block(x, y) => (x, y),
+        _ => todo!(),
+    };
+
+    let mut block = info.get_block(x, y).unwrap();
     let block_data = block.data();
     // if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Liquid
     // {
@@ -98,16 +108,16 @@ fn liquid_update(grid: &mut BlockGrid, x: i32, y: i32) {
 
     if rand::random::<f32>() < block_data.powder_stability {
         block.set(BlockProperties::POWDER_STABLE, true);
-        grid.set(x, y, block);
+        info.set_block(x, y, block);
     }
 
     if block.get(BlockProperties::POWDER_STABLE) {
         return;
     }
 
-    let to_check = grid.neighbors_shuffle(x, y, [-1, 1], [0]);
+    let to_check = neighbors_shuffle(x, y, [-1, 1], [0]);
     for (x2, y2) in to_check {
-        let block2 = grid.get(x2, y2);
+        let block2 = info.get_block(x2, y2);
         if block2.is_none() {
             continue;
         }
@@ -127,17 +137,17 @@ fn liquid_update(grid: &mut BlockGrid, x: i32, y: i32) {
         if block2_data.physics != BlockPhysics::None {
             block2.set(BlockProperties::MOVED_THIS_STEP, true);
         }
-        grid.set(x, y, block2);
-        grid.set(x2, y2, block);
+        info.set_block(x, y, block2);
+        info.set_block(x2, y2, block);
 
-        mark_unstable(grid, x, y, block.id);
+        mark_unstable(info, x, y, block.id);
         return;
     }
 }
 
-fn mark_unstable(grid: &mut BlockGrid, x: i32, y: i32, id: u16) {
-    for (x3, y3) in grid.neighbors(x, y, -1..2, -1..2) {
-        let block3 = grid.get(x3, y3);
+fn mark_unstable(info: &mut WorldInfo, x: i32, y: i32, id: u16) {
+    for (x3, y3) in neighbors(x, y, -1..2, -1..2) {
+        let block3 = info.get_block(x3, y3);
         if block3.is_none() {
             continue;
         }
@@ -146,19 +156,16 @@ fn mark_unstable(grid: &mut BlockGrid, x: i32, y: i32, id: u16) {
 
         if block3_data.physics == BlockPhysics::Liquid && block3.id == id {
             block3.set(BlockProperties::POWDER_STABLE, false);
-            grid.set(x3, y3, block3);
+            info.set_block(x3, y3, block3);
         }
     }
 }
 
-fn spell_update(spell_rule: &SpellRule, info: &mut WorldInfo, x: i32, y: i32) {
-    // let mut block = grid.get(x, y).unwrap();
-    // let block_data = block.data();
-
+fn spell_update(spell_rule: &SpellRule, info: &mut WorldInfo, source: Target) {
     let mut results: Vec<SpellResult> = vec![];
     spell_rule
         .spell
-        .cast(info, SpellTarget::new(Target::Block(x, y)), &mut |result| {
+        .cast(info, SpellTarget::new(source), &mut |result| {
             results.push(result)
         });
 
@@ -166,28 +173,25 @@ fn spell_update(spell_rule: &SpellRule, info: &mut WorldInfo, x: i32, y: i32) {
         if rand::random::<f32>() > spell_rule.rate {
             continue;
         }
-        let (x2, y2, mut block2) = match result.target.target {
-            Target::Block(x2, y2) => match info.grid.get(x2, y2) {
-                Some(block) => (x2, y2, block),
-                _ => continue,
-            },
-            _ => todo!(),
-        };
         for effect in result.effects {
             match effect {
-                SpellEffect::Send(Material(id)) => {
-                    block2 = Block::new(*id);
+                SpellEffect::Send(Material(id)) => match result.target.target {
+                    Target::Block(x, y) => {
+                        let mut block = info.get_block(x, y).unwrap();
+                        block.id = *id;
+                        info.set_block(x, y, block);
+                    }
+                    _ => todo!(),
+                },
+                SpellEffect::Send(Stored(property)) => {
+                    info.set(result.target.target, *property, 1.0);
                 }
-                SpellEffect::Send(BlockProperty(property)) => {
-                    block2.set(*property, true);
-                }
-                SpellEffect::Receive(BlockProperty(property)) => {
-                    block2.set(*property, false);
+                SpellEffect::Receive(Stored(property)) => {
+                    info.set(result.target.target, *property, 0.0);
                 }
                 _ => todo!(),
             }
         }
-        info.grid.set(x2, y2, block2);
     }
 }
 
@@ -198,12 +202,18 @@ pub(crate) struct UpdateRules {
 /// Initialize the simulation and its graphics
 pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResMut<Assets<Image>>) {
     let mut info = WorldInfo::default();
-    info.grid.set_range(115..120, 5..125, *SAND);
-    info.grid.set_range(15..20, 5..125, *WATER);
-    info.grid.set_range(55..60, 5..125, *COAL);
-    // info.grid.set_range(65..70, 0..5, *FIRE);
-    // info.grid.set_range_func(65..70, 0..5, |block| block.set(Stored(Burning), true));
-    info.grid.set_range(135..230, 15..225, *WATER);
+    set_block_range(&mut info, 0..GRID_SIZE as i32, 0..GRID_SIZE as i32, *SAND);
+    set_block_range(&mut info, 0..GRID_SIZE as i32, 0..GRID_SIZE as i32, *AIR);
+    set_block_range(&mut info, 115..120, 5..125, *SAND);
+    set_block_range(&mut info, 15..20, 5..125, *WATER);
+    set_block_range(&mut info, 55..60, 5..125, *COAL);
+    // set_block_range(&mut info, 65..70, 0..5, *FIRE);
+    for x in 65..70 {
+        for y in 0..25 {
+            info.set(Target::Block(x, y), Burning, 1.0)
+        }
+    }
+    set_block_range(&mut info, 135..230, 15..225, *WATER);
 
     let mut texture = Image::new_fill(
         Extent3d {
@@ -217,7 +227,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     );
     for x in 0..GRID_SIZE as i32 {
         for y in 0..GRID_SIZE as i32 {
-            update_texture_pixel(&info.grid, &mut texture, x, y);
+            update_texture_pixel(&info, &mut texture, x, y);
         }
     }
     let texture_handle = textures.add(texture);
@@ -254,11 +264,11 @@ pub(crate) fn system_update_block_grid(
         let span = info_span!("Updating sprites").entered();
         let texture = textures.get_mut(texture_handle).unwrap();
 
-        for (x, y) in info
-            .grid
-            .all_matching(BlockProperty(BlockProperties::CHANGED_THIS_STEP))
-        {
-            update_texture_pixel(&info.grid, texture, x, y);
+        for target in info.all_changed() {
+            match target {
+                Target::Block(x, y) => update_texture_pixel(&info, texture, x, y),
+                _ => todo!(),
+            }
         }
         span.exit();
     }
@@ -266,23 +276,15 @@ pub(crate) fn system_update_block_grid(
 
 fn step(info: &mut WorldInfo, update_rules: &UpdateRules) {
     let span = info_span!("Reset flags").entered();
-    info.grid
-        .clear_block_property(BlockProperties::MOVED_THIS_STEP);
-    info.grid
-        .clear_block_property(BlockProperties::CHANGED_THIS_STEP);
+    info.reset_changes();
     span.exit();
 
     for rule in &update_rules.update_rules {
         let span = info_span!("Rule", rule = &bevy::utils::tracing::field::debug(rule)).entered();
-
-        for (x, y) in info
-            .grid
-            .all_matching(rule.only_run_on())
-            .collect::<Vec<_>>()
-        {
-            rule.update(info, x, y);
+        let target_list = info.active_matching(rule.only_run_on()).collect::<Vec<_>>();
+        for target in target_list {
+            rule.update(info, target);
         }
-
         span.exit();
     }
 }

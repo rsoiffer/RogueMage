@@ -12,8 +12,6 @@ bitflags! {
         const MOVED_THIS_STEP = 1 << 0;
         /// Has this block settled into a stable state - can only be true for powders
         const POWDER_STABLE = 1 << 1;
-        /// Has this block changed at all this step
-        const CHANGED_THIS_STEP = 1 << 2;
     }
 }
 
@@ -22,7 +20,6 @@ impl BlockProperties {
         [
             BlockProperties::MOVED_THIS_STEP,
             BlockProperties::POWDER_STABLE,
-            BlockProperties::CHANGED_THIS_STEP,
         ]
         .into_iter()
     }
@@ -78,20 +75,13 @@ impl Block {
     }
 
     pub(crate) fn iter_properties<'a>(&'a self) -> impl Iterator<Item = Property> + 'a {
-        [Property::Material(self.id)]
-            .into_iter()
-            .chain(BlockProperties::iter_all().filter_map(|p| {
-                if self.get(p) {
-                    Some(Property::BlockProperty(p))
-                } else {
-                    None
-                }
-            }))
-            .chain(if self.data().physics == BlockPhysics::Liquid {
+        [Property::Material(self.id)].into_iter().chain(
+            if self.data().physics == BlockPhysics::Liquid {
                 Some(Dependent(Liquid))
             } else {
                 None
-            })
+            },
+        )
     }
 }
 

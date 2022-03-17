@@ -1,20 +1,13 @@
 use crate::blocks::*;
-use crate::cells::*;
+use crate::cells::GRID_SIZE;
 use crate::chemistry::Property::*;
 use crate::chemistry::StoredProperty::*;
 use crate::chemistry::*;
-use bevy::prelude::Entity;
 use lazy_static::lazy_static;
 use Spell::*;
 use SpellEffect::*;
 use SpellSelector::*;
 use Target::*;
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) enum Target {
-    Block(i32, i32),
-    Entity(Entity),
-}
 
 impl Target {
     fn for_each_adjacent<F: FnMut(Target)>(&self, mut f: F) {
@@ -23,7 +16,13 @@ impl Target {
                 for x2 in -1..2 {
                     for y2 in -1..2 {
                         if x2 != 0 || y2 != 0 {
-                            f(Block(x + x2, y + y2))
+                            if x + x2 >= 0
+                                && x + x2 < GRID_SIZE as i32
+                                && y + y2 >= 0
+                                && y + y2 < GRID_SIZE as i32
+                            {
+                                f(Block(x + x2, y + y2))
+                            }
                         }
                     }
                 }
@@ -251,7 +250,7 @@ lazy_static! {
             )
         },
         SpellRule {
-            name: "Fire makes coal start Stored(Burning)",
+            name: "Fire makes coal start burning",
             rate: 0.2,
             spell: basic(
                 [
@@ -276,7 +275,7 @@ lazy_static! {
             )
         },
         SpellRule {
-            name: "Stored(Burning) coal lights the air around it on fire",
+            name: "Burning coal lights the air around it on fire",
             rate: 0.2,
             spell: basic(
                 [
@@ -289,7 +288,7 @@ lazy_static! {
             )
         },
         SpellRule {
-            name: "Stored(Burning) coal transforms into smoke",
+            name: "Burning coal transforms into smoke",
             rate: 0.005,
             spell: basic(
                 [
