@@ -1,5 +1,6 @@
 use crate::blocks::*;
 use crate::cells::GRID_SIZE;
+use crate::chemistry::DependentProperty::*;
 use crate::chemistry::Property::*;
 use crate::chemistry::StoredProperty::*;
 use crate::chemistry::*;
@@ -21,13 +22,34 @@ impl Target {
                                 && y + y2 >= 0
                                 && y + y2 < GRID_SIZE as i32
                             {
-                                f(Block(x + x2, y + y2))
+                                f(Block(x + x2, y + y2));
                             }
                         }
                     }
                 }
+                for (&entity, collider) in info.entity_colliders.iter() {
+                    if collider.intersects(&AABBCollider::from_block(*x, *y)) {
+                        f(Entity(entity));
+                    }
+                }
             }
-            _ => todo!(),
+            Entity(entity) => {
+                let collider = info.entity_colliders.get(&entity).unwrap();
+                for x in (collider.ll.x.floor() as i32)..=(collider.ur.x.ceil() as i32) {
+                    for y in (collider.ll.y.floor() as i32)..=(collider.ur.y.ceil() as i32) {
+                        if x >= 0 && x < GRID_SIZE as i32 && y >= 0 && y < GRID_SIZE as i32 {
+                            f(Block(x, y));
+                        }
+                    }
+                }
+                for (&entity2, collider2) in info.entity_colliders.iter() {
+                    if *entity != entity2 {
+                        if collider.intersects(collider2) {
+                            f(Entity(entity2));
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -275,6 +297,31 @@ lazy_static! {
             name: "Steam transforms into water over time",
             rate: 0.001,
             spell: basic([Is(Material(*STEAM))], [Send(Material(*WATER))])
+        },
+        SpellRule {
+            name: "Burning materials light adjacent entities on fire",
+            rate: 0.1,
+            spell:basic(
+                [
+                    Is(Stored(Burning)),
+                    Adjacent,
+                    Is(Dependent(IsEntity)),
+                ],
+                [Send(Stored(Burning))]
+            ),
+        },
+        SpellRule {
+            name: "Burning entities light adjacent coal on fire",
+            rate: 0.1,
+            spell:basic(
+                [
+                    Is(Stored(Burning)),
+                    Is(Dependent(IsEntity)),
+                    Adjacent,
+                    Is(Material(*COAL)),
+                ],
+                [Send(Stored(Burning))]
+            ),
         },
     ];
 }

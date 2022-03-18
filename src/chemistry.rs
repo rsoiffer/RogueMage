@@ -3,9 +3,11 @@ use crate::{
     cells::BlockGrid,
 };
 use bevy::{
-    prelude::{Component, Entity},
+    math::Vec2,
+    prelude::{Component, Entity, Query},
     utils::{HashMap, HashSet},
 };
+use bevy_rapier2d::prelude::AABB;
 use Property::*;
 use Target::*;
 
@@ -29,16 +31,44 @@ pub(crate) enum StoredProperty {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum DependentProperty {
+    IsEntity,
     Liquid,
 }
+
+#[derive(Default)]
+pub(crate) struct AABBCollider {
+    pub(crate) ll: Vec2,
+    pub(crate) ur: Vec2,
+}
+
+impl AABBCollider {
+    pub(crate) fn intersects(&self, other: &AABBCollider) -> bool {
+        self.ll.x <= other.ur.x
+            && self.ur.x >= other.ll.x
+            && self.ll.y <= other.ur.y
+            && self.ur.y >= other.ll.y
+    }
+
+    pub(crate) fn from_block(x: i32, y: i32) -> AABBCollider {
+        AABBCollider {
+            ll: Vec2::new(x as f32, y as f32),
+            ur: Vec2::new((x + 1) as f32, (y + 1) as f32),
+        }
+    }
+}
+
+#[derive(Component)]
+pub(crate) struct ChemEntity;
 
 #[derive(Component, Default)]
 pub(crate) struct WorldInfo {
     /// The grid of blocks in the world
     blocks: BlockGrid,
+    /// The colliders of all entities in the world
+    pub(crate) entity_colliders: HashMap<Entity, AABBCollider>,
     /// Stores the value of every property on every target
     properties: HashMap<Target, HashMap<StoredProperty, f32>>,
-    /// Stores a set of active target with each property
+    /// Stores a set of active targets with each property
     active: HashMap<Property, HashSet<Target>>,
     /// The set of targets that have changed so far this step
     changed: HashSet<Target>,
@@ -54,14 +84,18 @@ impl WorldInfo {
                     0.0
                 }
             }
-            (Entity(e), Material(id)) => todo!(),
+            (Entity(e), Material(id)) => 0.0,
             (target, Stored(property)) => self
                 .properties
                 .get(&target)
                 .and_then(|m| m.get(&property))
                 .cloned()
                 .unwrap_or_default(),
-            (target, Dependent(property)) => todo!(),
+            (target, Dependent(property)) => match (target, property) {
+                (Block(x, y), DependentProperty::IsEntity) => 0.0,
+                (Entity(e), DependentProperty::IsEntity) => 1.0,
+                _ => todo!(),
+            },
         }
     }
 
@@ -154,7 +188,7 @@ impl WorldInfo {
                     block.set(BlockProperties::MOVED_THIS_STEP, false);
                     self.blocks.set(x, y, block);
                 }
-                _ => todo!(),
+                Entity(entity) => {}
             }
         }
         self.changed.clear()

@@ -4,6 +4,8 @@ use bevy::{
 };
 use bevy_rapier2d::prelude::*;
 
+use crate::chemistry::ChemEntity;
+
 #[derive(Component)]
 pub(crate) struct Player;
 
@@ -55,6 +57,7 @@ pub(crate) fn spawn_player(commands: &mut Commands, texture: Handle<Image>) -> E
         .insert_bundle(ColliderBundle::default())
         .insert(RigidBodyPositionSync::Discrete)
         .insert(Player)
+        .insert(ChemEntity)
         .id()
 }
 

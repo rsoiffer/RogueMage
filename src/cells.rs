@@ -16,10 +16,9 @@ pub(crate) struct BlockGrid {
 
 impl Default for BlockGrid {
     fn default() -> Self {
-        let mut grid = Self {
+        Self {
             grid: vec![Block::default(); GRID_SIZE * GRID_SIZE],
-        };
-        grid
+        }
     }
 }
 

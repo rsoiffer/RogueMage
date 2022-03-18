@@ -6,12 +6,17 @@ use crate::chemistry::StoredProperty::*;
 use crate::chemistry::*;
 use crate::spells::SpellSelector::*;
 use crate::spells::*;
+use bevy::math::Vec2;
 use bevy::prelude::Assets;
+use bevy::prelude::Color;
+use bevy::prelude::Entity;
 use bevy::prelude::Handle;
 use bevy::prelude::Image;
+use bevy::prelude::With;
 use bevy::render::render_resource::Extent3d;
 use bevy::render::render_resource::TextureDimension;
 use bevy::render::render_resource::TextureFormat;
+use bevy::sprite::Sprite;
 use bevy::{
     math::Vec3,
     prelude::{info_span, Commands, Query, Res, ResMut, Transform},
@@ -216,7 +221,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
             info.set(Target::Block(x, y), Burning, 1.0)
         }
     }
-    set_block_range(&mut info, 135..230, 15..225, *WATER);
+    // set_block_range(&mut info, 135..230, 15..225, *WATER);
 
     let mut texture = Image::new_fill(
         Extent3d {
@@ -245,7 +250,8 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     let scale = 1.0;
     commands
         .spawn_bundle(SpriteBundle {
-            transform: Transform::from_xyz(0.0, 0.0, 2.0).with_scale(Vec3::splat(scale)),
+            transform: Transform::from_xyz(GRID_SIZE as f32 / 2.0, GRID_SIZE as f32 / 2.0, 2.0)
+                .with_scale(Vec3::splat(scale)),
             texture: texture_handle,
             ..Default::default()
         })
@@ -258,23 +264,47 @@ pub(crate) fn system_update_block_grid(
     update_rules: Res<UpdateRules>,
     mut textures: ResMut<Assets<Image>>,
     mut query: Query<(&mut WorldInfo, &Handle<Image>)>,
+    mut query2: Query<(Entity, &Transform, &mut Sprite), With<ChemEntity>>,
 ) {
-    for (mut info, texture_handle) in query.iter_mut() {
-        let span = info_span!("Stepping blocks").entered();
-        step(&mut info, &update_rules);
-        span.exit();
+    let (mut info, texture_handle) = query.single_mut();
 
-        let span = info_span!("Updating sprites").entered();
-        let texture = textures.get_mut(texture_handle).unwrap();
-
-        for target in info.all_changed() {
-            match target {
-                Target::Block(x, y) => update_texture_pixel(&info, texture, x, y),
-                _ => todo!(),
-            }
-        }
-        span.exit();
+    let span = info_span!("Updating collider bounds").entered();
+    for (entity, transform, sprite) in query2.iter() {
+        let pos = Vec2::new(transform.translation.x, transform.translation.y);
+        info.entity_colliders.insert(
+            entity,
+            AABBCollider {
+                ll: pos - Vec2::splat(8.0),
+                ur: pos + Vec2::splat(8.0),
+            },
+        );
     }
+    span.exit();
+
+    let span = info_span!("Stepping blocks").entered();
+    step(&mut info, &update_rules);
+    span.exit();
+
+    let span = info_span!("Updating block sprites").entered();
+    let texture = textures.get_mut(texture_handle).unwrap();
+    for target in info.all_changed() {
+        match target {
+            Target::Block(x, y) => update_texture_pixel(&info, texture, x, y),
+            Target::Entity(entity) => {}
+        }
+    }
+    span.exit();
+
+    let span = info_span!("Updating entity sprites").entered();
+    for (entity, transform, mut sprite) in query2.iter_mut() {
+        sprite.color = if info.get(Target::Entity(entity), Stored(Burning)) > 0.0 {
+            Color::RED
+        } else {
+            Color::WHITE
+        };
+        // println!("Color is {:?}", sprite.color);
+    }
+    span.exit();
 }
 
 fn step(info: &mut WorldInfo, update_rules: &UpdateRules) {
