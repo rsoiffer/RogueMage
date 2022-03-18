@@ -4,10 +4,9 @@ use crate::{
 };
 use bevy::{
     math::Vec2,
-    prelude::{Component, Entity, Query},
+    prelude::{Component, Entity},
     utils::{HashMap, HashSet},
 };
-use bevy_rapier2d::prelude::AABB;
 use Property::*;
 use Target::*;
 

@@ -2,7 +2,6 @@ use crate::blocks::*;
 use crate::chemistry::Property::*;
 use crate::chemistry::StoredProperty::*;
 use crate::chemistry::*;
-use bevy::prelude::Color;
 use bevy::prelude::Image;
 use rand::seq::SliceRandom;
 
