@@ -64,6 +64,7 @@ pub(crate) struct WorldInfo {
     /// The grid of blocks in the world
     blocks: BlockGrid,
     /// The colliders of all entities in the world
+    // TODO: Consider storing AABBCollider as component on the entity instead.
     pub(crate) entity_colliders: HashMap<Entity, AABBCollider>,
     /// Stores the value of every property on every target
     properties: HashMap<Target, HashMap<DynamicProperty, f32>>,
