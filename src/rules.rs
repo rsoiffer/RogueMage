@@ -1,8 +1,8 @@
 use crate::blocks::*;
 use crate::cells::*;
-use crate::chemistry::DependentProperty::*;
+use crate::chemistry::DynamicProperty::*;
 use crate::chemistry::Property::*;
-use crate::chemistry::StoredProperty::*;
+use crate::chemistry::StaticProperty::*;
 use crate::chemistry::*;
 use crate::spells::SpellSelector::*;
 use crate::spells::*;
@@ -32,8 +32,8 @@ pub(crate) enum UpdateRule {
 impl UpdateRule {
     fn only_run_on(&self) -> Property {
         match self {
-            UpdateRule::GravityUpdateRule => Dependent(Liquid),
-            UpdateRule::LiquidUpdateRule => Dependent(Liquid),
+            UpdateRule::GravityUpdateRule => Static(Liquid),
+            UpdateRule::LiquidUpdateRule => Static(Liquid),
             UpdateRule::SpellUpdateRule(sr) => match &sr.spell {
                 Spell::Select(selector, _) => match selector {
                     Is(property) => *property,
@@ -65,7 +65,7 @@ fn gravity_update(info: &mut WorldInfo, target: Target) {
 
     let mut block = info.get_block(x, y).unwrap();
     let block_data = block.data();
-    if block.get(BlockProperties::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Liquid {
+    if block.get(PhysicsFlags::MOVED_THIS_STEP) || block_data.physics != BlockPhysics::Liquid {
         return;
     }
 
@@ -84,9 +84,9 @@ fn gravity_update(info: &mut WorldInfo, target: Target) {
             break;
         }
 
-        block.set(BlockProperties::MOVED_THIS_STEP, true);
+        block.set(PhysicsFlags::MOVED_THIS_STEP, true);
         if block2_data.physics != BlockPhysics::None {
-            block2.set(BlockProperties::MOVED_THIS_STEP, true);
+            block2.set(PhysicsFlags::MOVED_THIS_STEP, true);
         }
         info.set_block(x, y, block2);
         info.set_block(x, y2, block);
@@ -114,11 +114,11 @@ fn liquid_update(info: &mut WorldInfo, target: Target) {
     }
 
     if rand::random::<f32>() < block_data.powder_stability {
-        block.set(BlockProperties::POWDER_STABLE, true);
+        block.set(PhysicsFlags::POWDER_STABLE, true);
         info.set_block(x, y, block);
     }
 
-    if block.get(BlockProperties::POWDER_STABLE) {
+    if block.get(PhysicsFlags::POWDER_STABLE) {
         return;
     }
 
@@ -133,16 +133,16 @@ fn liquid_update(info: &mut WorldInfo, target: Target) {
 
         let density_advantage = block_data.density - block2_data.density;
 
-        if block2.get(BlockProperties::MOVED_THIS_STEP)
+        if block2.get(PhysicsFlags::MOVED_THIS_STEP)
             || (density_advantage <= 0.0 && block2_data.physics != BlockPhysics::None)
             || f32::abs(density_advantage) <= 1.0 * rand::random::<f32>()
         {
             continue;
         }
 
-        block.set(BlockProperties::MOVED_THIS_STEP, true);
+        block.set(PhysicsFlags::MOVED_THIS_STEP, true);
         if block2_data.physics != BlockPhysics::None {
-            block2.set(BlockProperties::MOVED_THIS_STEP, true);
+            block2.set(PhysicsFlags::MOVED_THIS_STEP, true);
         }
         info.set_block(x, y, block2);
         info.set_block(x2, y2, block);
@@ -163,7 +163,7 @@ fn mark_unstable(info: &mut WorldInfo, x: i32, y: i32, id: u16) {
         let block3_data = block3.data();
 
         if block3_data.physics == BlockPhysics::Liquid && block3.id == id {
-            block3.set(BlockProperties::POWDER_STABLE, false);
+            block3.set(PhysicsFlags::POWDER_STABLE, false);
             info.set_block(x3, y3, block3);
         }
     }
@@ -191,10 +191,10 @@ fn spell_update(spell_rule: &SpellRule, info: &mut WorldInfo, source: Target) {
                     }
                     _ => todo!(),
                 },
-                SpellEffect::Send(Stored(property)) => {
+                SpellEffect::Send(Dynamic(property)) => {
                     info.set(result.target.target, *property, 1.0);
                 }
-                SpellEffect::Receive(Stored(property)) => {
+                SpellEffect::Receive(Dynamic(property)) => {
                     info.set(result.target.target, *property, 0.0);
                 }
                 _ => todo!(),
@@ -297,7 +297,7 @@ pub(crate) fn system_update_block_grid(
 
     let span = info_span!("Updating entity sprites").entered();
     for (entity, transform, mut sprite) in query2.iter_mut() {
-        sprite.color = if info.get(Target::Entity(entity), Stored(Burning)) > 0.0 {
+        sprite.color = if info.get(Target::Entity(entity), Dynamic(Burning)) > 0.0 {
             Color::RED
         } else {
             Color::WHITE

@@ -1,8 +1,8 @@
 use crate::blocks::*;
 use crate::cells::GRID_SIZE;
-use crate::chemistry::DependentProperty::*;
+use crate::chemistry::DynamicProperty::*;
 use crate::chemistry::Property::*;
-use crate::chemistry::StoredProperty::*;
+use crate::chemistry::StaticProperty::*;
 use crate::chemistry::*;
 use lazy_static::lazy_static;
 use Spell::*;
@@ -219,11 +219,11 @@ lazy_static! {
             rate: 0.03,
             spell: basic(
                 [
-                    Is(Stored(Burning)),
+                    Is(Dynamic(Burning)),
                     not(Is(Material(*COAL))),
                     // Is(Material(*AIR))
                 ],
-                [Receive(Stored(Burning))]
+                [Receive(Dynamic(Burning))]
             )
         },
         SpellRule {
@@ -231,13 +231,13 @@ lazy_static! {
             rate: 0.2,
             spell: basic(
                 [
-                    Is(Stored(Burning)),
+                    Is(Dynamic(Burning)),
                     Is(Material(*AIR)),
                     Adjacent,
                     Is(Material(*COAL)),
-                    not(Is(Stored(Burning)))
+                    not(Is(Dynamic(Burning)))
                 ],
-                [Send(Stored(Burning))]
+                [Send(Dynamic(Burning))]
             ),
         },
         SpellRule {
@@ -246,9 +246,9 @@ lazy_static! {
             spell: basic(
                 [
                     Is(Material(*COAL)),
-                    Is(Stored(Burning))
+                    Is(Dynamic(Burning))
                 ],
-                [Receive(Stored(Burning))]
+                [Receive(Dynamic(Burning))]
             )
         },
         SpellRule {
@@ -257,11 +257,11 @@ lazy_static! {
             spell: basic(
                 [
                     Is(Material(*COAL)),
-                    Is(Stored(Burning)),
+                    Is(Dynamic(Burning)),
                     Adjacent,
                     Is(Material(*AIR)),
                 ],
-                [Send(Stored(Burning))]
+                [Send(Dynamic(Burning))]
             )
         },
         SpellRule {
@@ -270,7 +270,7 @@ lazy_static! {
             spell: basic(
                 [
                     Is(Material(*COAL)),
-                    Is(Stored(Burning)),
+                    Is(Dynamic(Burning)),
                 ],
                 [Send(Material(*SMOKE))]
             )
@@ -285,7 +285,7 @@ lazy_static! {
             rate: 0.02,
             spell: basic(
                 [
-                    Is(Stored(Burning)),
+                    Is(Dynamic(Burning)),
                     Is(Material(*AIR)),
                     Adjacent,
                     Is(Material(*WATER)),
@@ -303,11 +303,11 @@ lazy_static! {
             rate: 0.1,
             spell:basic(
                 [
-                    Is(Stored(Burning)),
+                    Is(Dynamic(Burning)),
                     Adjacent,
-                    Is(Dependent(IsEntity)),
+                    Is(Static(IsEntity)),
                 ],
-                [Send(Stored(Burning))]
+                [Send(Dynamic(Burning))]
             ),
         },
         SpellRule {
@@ -315,12 +315,12 @@ lazy_static! {
             rate: 0.1,
             spell:basic(
                 [
-                    Is(Stored(Burning)),
-                    Is(Dependent(IsEntity)),
+                    Is(Dynamic(Burning)),
+                    Is(Static(IsEntity)),
                     Adjacent,
                     Is(Material(*COAL)),
                 ],
-                [Send(Stored(Burning))]
+                [Send(Dynamic(Burning))]
             ),
         },
     ];

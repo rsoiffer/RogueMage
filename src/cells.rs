@@ -1,6 +1,6 @@
 use crate::blocks::*;
+use crate::chemistry::DynamicProperty::*;
 use crate::chemistry::Property::*;
-use crate::chemistry::StoredProperty::*;
 use crate::chemistry::*;
 use bevy::prelude::Image;
 use rand::seq::SliceRandom;
@@ -68,7 +68,7 @@ pub(crate) fn update_texture_pixel(info: &WorldInfo, texture: &mut Image, x: i32
     let mut color = block.color();
 
     // Draw all burning blocks as fire
-    if info.get(Target::Block(x, y), Stored(Burning)) > 0.0 {
+    if info.get(Target::Block(x, y), Dynamic(Burning)) > 0.0 {
         let x = rand::random::<f32>();
         let fire_data = ALL_BLOCK_DATA.get(*FIRE as usize).unwrap();
         color = fire_data.color1 * x + fire_data.color2 * (1.0 - x);

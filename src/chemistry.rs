@@ -1,5 +1,5 @@
 use crate::{
-    blocks::{Block, BlockProperties},
+    blocks::{Block, PhysicsFlags},
     cells::BlockGrid,
 };
 use bevy::{
@@ -19,17 +19,17 @@ pub(crate) enum Target {
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum Property {
     Material(u16),
-    Stored(StoredProperty),
-    Dependent(DependentProperty),
+    Dynamic(DynamicProperty),
+    Static(StaticProperty),
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum StoredProperty {
+pub(crate) enum DynamicProperty {
     Burning,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub(crate) enum DependentProperty {
+pub(crate) enum StaticProperty {
     IsEntity,
     Liquid,
 }
@@ -66,7 +66,7 @@ pub(crate) struct WorldInfo {
     /// The colliders of all entities in the world
     pub(crate) entity_colliders: HashMap<Entity, AABBCollider>,
     /// Stores the value of every property on every target
-    properties: HashMap<Target, HashMap<StoredProperty, f32>>,
+    properties: HashMap<Target, HashMap<DynamicProperty, f32>>,
     /// Stores a set of active targets with each property
     active: HashMap<Property, HashSet<Target>>,
     /// The set of targets that have changed so far this step
@@ -84,34 +84,34 @@ impl WorldInfo {
                 }
             }
             (Entity(e), Material(id)) => 0.0,
-            (target, Stored(property)) => self
+            (target, Dynamic(property)) => self
                 .properties
                 .get(&target)
                 .and_then(|m| m.get(&property))
                 .cloned()
                 .unwrap_or_default(),
-            (target, Dependent(property)) => match (target, property) {
-                (Block(x, y), DependentProperty::IsEntity) => 0.0,
-                (Entity(e), DependentProperty::IsEntity) => 1.0,
+            (target, Static(property)) => match (target, property) {
+                (Block(x, y), StaticProperty::IsEntity) => 0.0,
+                (Entity(e), StaticProperty::IsEntity) => 1.0,
                 _ => todo!(),
             },
         }
     }
 
-    pub(crate) fn set(&mut self, target: Target, property: StoredProperty, value: f32) {
+    pub(crate) fn set(&mut self, target: Target, property: DynamicProperty, value: f32) {
         let properties = self.properties.entry(target).or_default();
         let old_value = properties.get(&property).cloned().unwrap_or_default();
         if old_value != value {
             if value == 0.0 {
                 properties.remove(&property);
                 self.active
-                    .entry(Stored(property))
+                    .entry(Dynamic(property))
                     .or_default()
                     .remove(&target);
             } else {
                 properties.insert(property, value);
                 self.active
-                    .entry(Stored(property))
+                    .entry(Dynamic(property))
                     .or_default()
                     .insert(target);
             }
@@ -125,26 +125,26 @@ impl WorldInfo {
 
         for &property in properties1.iter().flat_map(|m| m.keys()) {
             self.active
-                .entry(Stored(property))
+                .entry(Dynamic(property))
                 .or_default()
                 .remove(&target1);
         }
         for &property in properties2.iter().flat_map(|m| m.keys()) {
             self.active
-                .entry(Stored(property))
+                .entry(Dynamic(property))
                 .or_default()
                 .remove(&target2);
         }
 
         for &property in properties1.iter().flat_map(|m| m.keys()) {
             self.active
-                .entry(Stored(property))
+                .entry(Dynamic(property))
                 .or_default()
                 .insert(target2);
         }
         for &property in properties2.iter().flat_map(|m| m.keys()) {
             self.active
-                .entry(Stored(property))
+                .entry(Dynamic(property))
                 .or_default()
                 .insert(target1);
         }
@@ -184,7 +184,7 @@ impl WorldInfo {
             match target {
                 Block(x, y) => {
                     let mut block = self.blocks.get(x, y).unwrap();
-                    block.set(BlockProperties::MOVED_THIS_STEP, false);
+                    block.set(PhysicsFlags::MOVED_THIS_STEP, false);
                     self.blocks.set(x, y, block);
                 }
                 Entity(entity) => {}

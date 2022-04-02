@@ -1,5 +1,5 @@
-use crate::chemistry::DependentProperty::*;
 use crate::chemistry::Property::*;
+use crate::chemistry::StaticProperty::*;
 use crate::chemistry::*;
 use bevy::prelude::Color;
 use bitflags::bitflags;
@@ -7,21 +7,11 @@ use lazy_static::lazy_static;
 
 bitflags! {
     #[derive(Default)]
-    pub(crate) struct BlockProperties: u32 {
+    pub(crate) struct PhysicsFlags: u32 {
         /// Has this block already moved this step
         const MOVED_THIS_STEP = 1 << 0;
         /// Has this block settled into a stable state - can only be true for powders
         const POWDER_STABLE = 1 << 1;
-    }
-}
-
-impl BlockProperties {
-    pub(crate) fn iter_all() -> impl Iterator<Item = BlockProperties> {
-        [
-            BlockProperties::MOVED_THIS_STEP,
-            BlockProperties::POWDER_STABLE,
-        ]
-        .into_iter()
     }
 }
 
@@ -33,8 +23,8 @@ pub(crate) struct Block {
     color_seed: u8,
     /// Reserved for future use
     damage: u8,
-    /// The stored properties, all boolean-valued
-    stored_properties: BlockProperties,
+    /// The physics flags.
+    physics_flags: PhysicsFlags,
 }
 
 impl Default for Block {
@@ -43,7 +33,7 @@ impl Default for Block {
             id: Default::default(),
             color_seed: rand::random(),
             damage: Default::default(),
-            stored_properties: Default::default(),
+            physics_flags: Default::default(),
         }
     }
 }
@@ -66,18 +56,18 @@ impl Block {
         ALL_BLOCK_DATA.get(self.id as usize).unwrap()
     }
 
-    pub(crate) fn get(&self, property: BlockProperties) -> bool {
-        self.stored_properties.contains(property)
+    pub(crate) fn get(&self, flags: PhysicsFlags) -> bool {
+        self.physics_flags.contains(flags)
     }
 
-    pub(crate) fn set(&mut self, property: BlockProperties, value: bool) {
-        self.stored_properties.set(property, value)
+    pub(crate) fn set(&mut self, flags: PhysicsFlags, value: bool) {
+        self.physics_flags.set(flags, value)
     }
 
     pub(crate) fn iter_properties<'a>(&'a self) -> impl Iterator<Item = Property> + 'a {
         [Property::Material(self.id)].into_iter().chain(
             if self.data().physics == BlockPhysics::Liquid {
-                Some(Dependent(Liquid))
+                Some(Static(Liquid))
             } else {
                 None
             },
