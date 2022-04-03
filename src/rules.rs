@@ -29,22 +29,30 @@ pub(crate) enum UpdateRule {
     LiquidUpdateRule,
     SpellUpdateRule(&'static SpellRule),
 }
+
 impl UpdateRule {
     fn only_run_on(&self) -> Property {
         match self {
             UpdateRule::GravityUpdateRule => Static(Liquid),
             UpdateRule::LiquidUpdateRule => Static(Liquid),
-            UpdateRule::SpellUpdateRule(sr) => match &sr.spell {
-                Spell::Select(selector, _) => match selector {
-                    Is(property) => *property,
-                    Bind(selector, _) => match **selector {
-                        Is(property) => property,
-                        _ => panic!("Spell started with non-Is selector: {:?}", sr),
-                    },
-                    _ => panic!("Spell started with non-Is selector: {:?}", sr),
-                },
-                _ => panic!("Spell doesn't have any selectors: {:?}", sr),
-            },
+            UpdateRule::SpellUpdateRule(sr) => {
+                if let Some(mana_id) = sr.drain {
+                    // TODO: This is hacky.
+                    Dynamic(Mana(mana_id))
+                } else {
+                    match &sr.spell {
+                        Spell::Select(selector, _) => match selector {
+                            Is(property) => *property,
+                            Bind(selector, _) => match **selector {
+                                Is(property) => property,
+                                _ => panic!("Spell started with non-Is selector: {:?}", sr),
+                            },
+                            _ => panic!("Spell started with non-Is selector: {:?}", sr),
+                        },
+                        _ => panic!("Spell doesn't have any selectors: {:?}", sr),
+                    }
+                }
+            }
         }
     }
 
@@ -170,36 +178,47 @@ fn mark_unstable(info: &mut WorldInfo, x: i32, y: i32, id: u16) {
 }
 
 fn spell_update(spell_rule: &SpellRule, info: &mut WorldInfo, source: Target) {
-    let mut results: Vec<SpellResult> = vec![];
+    let mut results = vec![];
     spell_rule
         .spell
-        .cast(info, SpellTarget::new(source), &mut |result| {
-            results.push(result)
-        });
+        .cast(info, SpellTarget::new(source), &mut |r| results.push(r));
 
     for result in results {
         if rand::random::<f32>() > spell_rule.rate {
             continue;
         }
+
         for effect in result.effects {
+            // TODO: Add/Send should be handled differently.
             match effect {
-                SpellEffect::Send(Material(id)) => match result.target.target {
-                    Target::Block(x, y) => {
-                        let mut block = info.get_block(x, y).unwrap();
-                        block.id = *id;
-                        info.set_block(x, y, block);
+                SpellEffect::Summon => todo!(),
+                SpellEffect::Add(Static(_)) => todo!(),
+                SpellEffect::Remove(_) => todo!(),
+                SpellEffect::Add(Material(id)) | SpellEffect::Send(Material(id)) => {
+                    match result.target.target {
+                        Target::Block(x, y) => {
+                            let mut block = info.get_block(x, y).unwrap();
+                            block.id = *id;
+                            info.set_block(x, y, block);
+                        }
+                        Target::Entity(_) => todo!(),
                     }
-                    _ => todo!(),
-                },
-                SpellEffect::Send(Dynamic(property)) => {
+                }
+                SpellEffect::Add(Dynamic(property)) | SpellEffect::Send(Dynamic(property)) => {
                     info.set(result.target.target, *property, 1.0);
                 }
+                SpellEffect::Send(Static(_)) => todo!(),
+                SpellEffect::Receive(Material(_)) => todo!(),
                 SpellEffect::Receive(Dynamic(property)) => {
                     info.set(result.target.target, *property, 0.0);
                 }
-                _ => todo!(),
+                SpellEffect::Receive(Static(_)) => todo!(),
             }
         }
+    }
+
+    if let Some(mana_id) = spell_rule.drain {
+        info.set(source, DynamicProperty::Mana(mana_id), 0.0);
     }
 }
 
@@ -240,11 +259,12 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     }
     let texture_handle = textures.add(texture);
 
-    let mut update_rules: Vec<UpdateRule> =
-        vec![UpdateRule::GravityUpdateRule, UpdateRule::LiquidUpdateRule];
-    for r in NATURAL_RULES.iter() {
-        update_rules.push(UpdateRule::SpellUpdateRule(r));
-    }
+    let update_rules: Vec<_> = [UpdateRule::GravityUpdateRule, UpdateRule::LiquidUpdateRule]
+        .into_iter()
+        .chain(NATURAL_RULES.iter().map(UpdateRule::SpellUpdateRule))
+        .chain(PLAYER_RULES.iter().map(UpdateRule::SpellUpdateRule))
+        .collect();
+
     commands.insert_resource(UpdateRules { update_rules });
 
     let scale = 1.0;

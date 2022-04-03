@@ -144,6 +144,8 @@ fn not(spell: SpellSelector) -> SpellSelector {
 #[derive(Debug)]
 pub(crate) enum SpellEffect {
     Summon,
+    Add(Property),
+    Remove(Property),
     Send(Property),
     Receive(Property),
 }
@@ -199,16 +201,21 @@ where
     I1: IntoIterator<Item = SpellSelector>,
     I2: IntoIterator<Item = SpellEffect>,
 {
-    Select(
-        bind(selectors),
-        Box::new(Effects(effects.into_iter().collect::<Vec<_>>())),
-    )
+    let mut selectors = selectors.into_iter().peekable();
+    let effects = Effects(effects.into_iter().collect());
+
+    if selectors.peek().is_some() {
+        Select(bind(selectors), Box::new(effects))
+    } else {
+        effects
+    }
 }
 
 #[derive(Debug)]
 pub(crate) struct SpellRule {
     pub(crate) name: &'static str,
     pub(crate) rate: f32,
+    pub(crate) drain: Option<ManaId>,
     pub(crate) spell: Spell,
 }
 
@@ -217,6 +224,7 @@ lazy_static! {
         SpellRule {
             name: "Fire disappears over time",
             rate: 0.03,
+            drain: None,
             spell: basic(
                 [
                     Is(Dynamic(Burning)),
@@ -229,6 +237,7 @@ lazy_static! {
         SpellRule {
             name: "Fire makes coal start burning",
             rate: 0.2,
+            drain: None,
             spell: basic(
                 [
                     Is(Dynamic(Burning)),
@@ -243,6 +252,7 @@ lazy_static! {
         SpellRule {
             name: "Coal burns out over time",
             rate: 0.01,
+            drain: None,
             spell: basic(
                 [
                     Is(Material(*COAL)),
@@ -254,6 +264,7 @@ lazy_static! {
         SpellRule {
             name: "Burning coal lights the air around it on fire",
             rate: 0.2,
+            drain: None,
             spell: basic(
                 [
                     Is(Material(*COAL)),
@@ -267,6 +278,7 @@ lazy_static! {
         SpellRule {
             name: "Burning coal transforms into smoke",
             rate: 0.005,
+            drain: None,
             spell: basic(
                 [
                     Is(Material(*COAL)),
@@ -278,11 +290,13 @@ lazy_static! {
         SpellRule {
             name: "Smoke disappears over time",
             rate: 0.001,
+            drain: None,
             spell: basic([Is(Material(*SMOKE))], [Send(Material(*AIR))])
         },
         SpellRule {
             name: "Fire turns water into steam",
             rate: 0.02,
+            drain: None,
             spell: basic(
                 [
                     Is(Dynamic(Burning)),
@@ -296,12 +310,14 @@ lazy_static! {
         SpellRule {
             name: "Steam transforms into water over time",
             rate: 0.001,
+            drain: None,
             spell: basic([Is(Material(*STEAM))], [Send(Material(*WATER))])
         },
         SpellRule {
             name: "Burning materials light adjacent entities on fire",
             rate: 0.1,
-            spell:basic(
+            drain: None,
+            spell: basic(
                 [
                     Is(Dynamic(Burning)),
                     Adjacent,
@@ -313,7 +329,8 @@ lazy_static! {
         SpellRule {
             name: "Burning entities light adjacent coal on fire",
             rate: 0.1,
-            spell:basic(
+            drain: None,
+            spell: basic(
                 [
                     Is(Dynamic(Burning)),
                     Is(Static(IsEntity)),
@@ -322,6 +339,47 @@ lazy_static! {
                 ],
                 [Send(Dynamic(Burning))]
             ),
+        },
+    ];
+
+    pub(crate) static ref PLAYER_RULES: Vec<SpellRule> = vec![
+        SpellRule {
+            name: "Create water",
+            rate: f32::INFINITY,
+            drain: Some(ManaId(0)),
+            spell: basic(
+                [
+                    Adjacent,
+                    Is(Material(*AIR)),
+                ],
+                [Add(Material(*WATER))],
+            )
+        },
+        SpellRule {
+            name: "Launch fireball",
+            rate: f32::INFINITY,
+            drain: Some(ManaId(1)),
+            spell: basic(
+                [],
+                [
+                    Summon,
+                    Add(Dynamic(Forwards)),
+                    Add(Dynamic(Mana(ManaId(2)))),
+                ],
+            )
+        },
+        SpellRule {
+            name: "Fireball",
+            rate: f32::INFINITY,
+            drain: Some(ManaId(2)),
+            spell: basic(
+                [
+                    Adjacent,
+                    not(Is(Material(*AIR))),
+                    Adjacent, // TODO: Area(5)
+                ],
+                [Add(Material(*FIRE))],
+            )
         },
     ];
 }

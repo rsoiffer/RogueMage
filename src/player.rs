@@ -1,10 +1,9 @@
+use crate::chemistry::{ChemEntity, DynamicProperty, ManaId, Target, WorldInfo};
 use bevy::{
     math::{Vec3Swizzles, XY},
     prelude::*,
 };
 use bevy_rapier2d::prelude::*;
-
-use crate::chemistry::ChemEntity;
 
 #[derive(Component)]
 pub(crate) struct Player;
@@ -12,6 +11,11 @@ pub(crate) struct Player;
 const ACCELERATION: Real = 1000.0;
 const DRAG: Real = 10.0;
 const CAMERA_RATE: Real = 4.0;
+
+const SPELL_KEYS: &[(KeyCode, ManaId)] = &[
+    (KeyCode::Key1, ManaId(0)),
+    // TODO: (KeyCode::Key2, ManaId(1))
+];
 
 pub(crate) fn move_player_system(
     input: Res<Input<KeyCode>>,
@@ -79,6 +83,22 @@ pub(crate) fn move_camera_system(
 
     camera_transform.translation.x = x;
     camera_transform.translation.y = y;
+}
+
+pub(crate) fn cast_spell_system(
+    input: Res<Input<KeyCode>>,
+    mut world_query: Query<&mut WorldInfo>,
+    player_query: Query<Entity, With<Player>>,
+) {
+    let mut world = world_query.single_mut();
+
+    for player in player_query.iter() {
+        for (key, mana_id) in SPELL_KEYS {
+            if input.just_pressed(*key) {
+                world.set(Target::Entity(player), DynamicProperty::Mana(*mana_id), 1.0);
+            }
+        }
+    }
 }
 
 fn thrust_component(input: &Input<KeyCode>, positive: KeyCode, negative: KeyCode) -> Real {

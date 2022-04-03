@@ -10,7 +10,7 @@ use bevy::{
     prelude::*,
 };
 use bevy_rapier2d::prelude::*;
-use player::{move_camera_system, move_player_system, spawn_player};
+use player::{cast_spell_system, move_camera_system, move_player_system, spawn_player};
 use rules::*;
 
 fn main() {
@@ -35,6 +35,7 @@ fn main() {
         .add_system(system_update_block_grid)
         .add_system(move_player_system)
         .add_system(move_camera_system)
+        .add_system(cast_spell_system)
         .run();
 }
 

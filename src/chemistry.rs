@@ -25,7 +25,9 @@ pub(crate) enum Property {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum DynamicProperty {
+    Mana(ManaId),
     Burning,
+    Forwards,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -33,6 +35,9 @@ pub(crate) enum StaticProperty {
     IsEntity,
     Liquid,
 }
+
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+pub(crate) struct ManaId(pub(crate) u8);
 
 #[derive(Default)]
 pub(crate) struct AABBCollider {
@@ -59,6 +64,7 @@ impl AABBCollider {
 #[derive(Component)]
 pub(crate) struct ChemEntity;
 
+// TODO: WorldInfo should be a resource, not a component.
 #[derive(Component, Default)]
 pub(crate) struct WorldInfo {
     /// The grid of blocks in the world
@@ -84,7 +90,7 @@ impl WorldInfo {
                     0.0
                 }
             }
-            (Entity(e), Material(id)) => 0.0,
+            (Entity(_), Material(_)) => 0.0,
             (target, Dynamic(property)) => self
                 .properties
                 .get(&target)
@@ -92,8 +98,8 @@ impl WorldInfo {
                 .cloned()
                 .unwrap_or_default(),
             (target, Static(property)) => match (target, property) {
-                (Block(x, y), StaticProperty::IsEntity) => 0.0,
-                (Entity(e), StaticProperty::IsEntity) => 1.0,
+                (Block(_, _), StaticProperty::IsEntity) => 0.0,
+                (Entity(_), StaticProperty::IsEntity) => 1.0,
                 _ => todo!(),
             },
         }
@@ -188,7 +194,7 @@ impl WorldInfo {
                     block.set(PhysicsFlags::MOVED_THIS_STEP, false);
                     self.blocks.set(x, y, block);
                 }
-                Entity(entity) => {}
+                Entity(_) => {}
             }
         }
         self.changed.clear()
