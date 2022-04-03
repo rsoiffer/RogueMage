@@ -25,42 +25,39 @@ use bevy::{
 
 #[derive(Debug)]
 pub(crate) enum UpdateRule {
-    GravityUpdateRule,
-    LiquidUpdateRule,
-    SpellUpdateRule(&'static SpellRule),
+    Gravity,
+    Liquid,
+    Spell(&'static SpellRule),
 }
 
 impl UpdateRule {
     fn only_run_on(&self) -> Property {
         match self {
-            UpdateRule::GravityUpdateRule => Static(Liquid),
-            UpdateRule::LiquidUpdateRule => Static(Liquid),
-            UpdateRule::SpellUpdateRule(sr) => {
-                if let Some(mana_id) = sr.drain {
-                    // TODO: This is hacky.
-                    Dynamic(Mana(mana_id))
-                } else {
-                    match &sr.spell {
-                        Spell::Select(selector, _) => match selector {
-                            Is(property) => *property,
-                            Bind(selector, _) => match **selector {
-                                Is(property) => property,
-                                _ => panic!("Spell started with non-Is selector: {:?}", sr),
-                            },
-                            _ => panic!("Spell started with non-Is selector: {:?}", sr),
-                        },
-                        _ => panic!("Spell doesn't have any selectors: {:?}", sr),
-                    }
-                }
-            }
+            UpdateRule::Gravity => Static(Liquid),
+            UpdateRule::Liquid => Static(Liquid),
+            UpdateRule::Spell(SpellRule {
+                drain: Some(mana_id),
+                ..
+            }) => Dynamic(Mana(*mana_id)), // TODO: This is hacky.
+            UpdateRule::Spell(sr) => match &sr.spell {
+                Spell::Select(selector, _) => match selector {
+                    Is(property) => *property,
+                    Bind(selector, _) => match **selector {
+                        Is(property) => property,
+                        _ => panic!("Spell started with non-Is selector: {:?}", sr),
+                    },
+                    _ => panic!("Spell started with non-Is selector: {:?}", sr),
+                },
+                _ => panic!("Spell doesn't have any selectors: {:?}", sr),
+            },
         }
     }
 
     fn update(&self, info: &mut WorldInfo, target: Target) {
         match self {
-            UpdateRule::GravityUpdateRule => gravity_update(info, target),
-            UpdateRule::LiquidUpdateRule => liquid_update(info, target),
-            UpdateRule::SpellUpdateRule(c) => spell_update(c, info, target),
+            UpdateRule::Gravity => gravity_update(info, target),
+            UpdateRule::Liquid => liquid_update(info, target),
+            UpdateRule::Spell(c) => spell_update(c, info, target),
         }
     }
 }
@@ -259,10 +256,10 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
     }
     let texture_handle = textures.add(texture);
 
-    let update_rules: Vec<_> = [UpdateRule::GravityUpdateRule, UpdateRule::LiquidUpdateRule]
+    let update_rules: Vec<_> = [UpdateRule::Gravity, UpdateRule::Liquid]
         .into_iter()
-        .chain(NATURAL_RULES.iter().map(UpdateRule::SpellUpdateRule))
-        .chain(PLAYER_RULES.iter().map(UpdateRule::SpellUpdateRule))
+        .chain(NATURAL_RULES.iter().map(UpdateRule::Spell))
+        .chain(PLAYER_RULES.iter().map(UpdateRule::Spell))
         .collect();
 
     commands.insert_resource(UpdateRules { update_rules });
@@ -289,7 +286,7 @@ pub(crate) fn system_update_block_grid(
     let (mut info, texture_handle) = query.single_mut();
 
     let span = info_span!("Updating collider bounds").entered();
-    for (entity, transform, sprite) in query2.iter() {
+    for (entity, transform, _sprite) in query2.iter() {
         let pos = Vec2::new(transform.translation.x, transform.translation.y);
         info.entity_colliders.insert(
             entity,
@@ -310,13 +307,13 @@ pub(crate) fn system_update_block_grid(
     for target in info.all_changed() {
         match target {
             Target::Block(x, y) => update_texture_pixel(&info, texture, x, y),
-            Target::Entity(entity) => {}
+            Target::Entity(_) => {}
         }
     }
     span.exit();
 
     let span = info_span!("Updating entity sprites").entered();
-    for (entity, transform, mut sprite) in query2.iter_mut() {
+    for (entity, _transform, mut sprite) in query2.iter_mut() {
         sprite.color = if info.get(Target::Entity(entity), Dynamic(Burning)) > 0.0 {
             Color::RED
         } else {
