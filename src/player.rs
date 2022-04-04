@@ -12,10 +12,7 @@ const ACCELERATION: Real = 1000.0;
 const DRAG: Real = 10.0;
 const CAMERA_RATE: Real = 4.0;
 
-const SPELL_KEYS: &[(KeyCode, ManaId)] = &[
-    (KeyCode::Key1, ManaId(0)),
-    // TODO: (KeyCode::Key2, ManaId(1))
-];
+const SPELL_KEYS: &[(KeyCode, ManaId)] = &[(KeyCode::Key1, ManaId(0)), (KeyCode::Key2, ManaId(1))];
 
 pub(crate) fn move_player_system(
     input: Res<Input<KeyCode>>,

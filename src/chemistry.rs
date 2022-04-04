@@ -46,6 +46,10 @@ pub(crate) struct AABBCollider {
 }
 
 impl AABBCollider {
+    pub(crate) fn center(&self) -> Vec2 {
+        Vec2::new((self.ll.x + self.ur.x) / 2.0, (self.ll.y + self.ur.y) / 2.0)
+    }
+
     pub(crate) fn intersects(&self, other: &AABBCollider) -> bool {
         self.ll.x <= other.ur.x
             && self.ur.x >= other.ll.x
@@ -106,6 +110,7 @@ impl WorldInfo {
     }
 
     pub(crate) fn set(&mut self, target: Target, property: DynamicProperty, value: f32) {
+        // TODO: When the 'touched' field is added, touch adjacent targets here.
         let properties = self.properties.entry(target).or_default();
         let old_value = properties.get(&property).cloned().unwrap_or_default();
         if old_value != value {

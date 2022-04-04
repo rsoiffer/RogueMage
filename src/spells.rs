@@ -34,18 +34,21 @@ impl Target {
                 }
             }
             Entity(entity) => {
-                let collider = info.entity_colliders.get(&entity).unwrap();
-                for x in (collider.ll.x.floor() as i32)..=(collider.ur.x.ceil() as i32) {
-                    for y in (collider.ll.y.floor() as i32)..=(collider.ur.y.ceil() as i32) {
-                        if x >= 0 && x < GRID_SIZE as i32 && y >= 0 && y < GRID_SIZE as i32 {
-                            f(Block(x, y));
+                // TODO: The collider should always be there - ignoring missing colliders is a
+                // workaround for the single-buffered active target map.
+                if let Some(collider) = info.entity_colliders.get(&entity) {
+                    for x in (collider.ll.x.floor() as i32)..=(collider.ur.x.ceil() as i32) {
+                        for y in (collider.ll.y.floor() as i32)..=(collider.ur.y.ceil() as i32) {
+                            if x >= 0 && x < GRID_SIZE as i32 && y >= 0 && y < GRID_SIZE as i32 {
+                                f(Block(x, y));
+                            }
                         }
                     }
-                }
-                for (&entity2, collider2) in info.entity_colliders.iter() {
-                    if *entity != entity2 {
-                        if collider.intersects(collider2) {
-                            f(Entity(entity2));
+                    for (&entity2, collider2) in info.entity_colliders.iter() {
+                        if *entity != entity2 {
+                            if collider.intersects(collider2) {
+                                f(Entity(entity2));
+                            }
                         }
                     }
                 }
@@ -344,7 +347,7 @@ lazy_static! {
 
     pub(crate) static ref PLAYER_RULES: Vec<SpellRule> = vec![
         SpellRule {
-            name: "Create water",
+            name: "Summon water",
             rate: f32::INFINITY,
             drain: Some(ManaId(0)),
             spell: basic(
@@ -356,7 +359,7 @@ lazy_static! {
             )
         },
         SpellRule {
-            name: "Launch fireball",
+            name: "Summon fireball",
             rate: f32::INFINITY,
             drain: Some(ManaId(1)),
             spell: basic(
@@ -376,9 +379,9 @@ lazy_static! {
                 [
                     Adjacent,
                     not(Is(Material(*AIR))),
-                    Adjacent, // TODO: Area(5)
+                    // TODO: Area(5)
                 ],
-                [Add(Material(*FIRE))],
+                [Add(Dynamic(Burning))],
             )
         },
     ];

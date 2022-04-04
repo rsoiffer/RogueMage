@@ -1,26 +1,18 @@
-use crate::blocks::*;
-use crate::cells::*;
-use crate::chemistry::DynamicProperty::*;
-use crate::chemistry::Property::*;
-use crate::chemistry::StaticProperty::*;
-use crate::chemistry::*;
-use crate::spells::SpellSelector::*;
-use crate::spells::*;
-use bevy::math::Vec2;
-use bevy::prelude::Assets;
-use bevy::prelude::Color;
-use bevy::prelude::Entity;
-use bevy::prelude::Handle;
-use bevy::prelude::Image;
-use bevy::prelude::With;
-use bevy::render::render_resource::Extent3d;
-use bevy::render::render_resource::TextureDimension;
-use bevy::render::render_resource::TextureFormat;
-use bevy::sprite::Sprite;
+use crate::{
+    blocks::*,
+    cells::*,
+    chemistry::{DynamicProperty::*, Property::*, StaticProperty::*, *},
+    spells::{SpellSelector::*, *},
+};
 use bevy::{
-    math::Vec3,
-    prelude::{info_span, Commands, Query, Res, ResMut, Transform},
-    sprite::SpriteBundle,
+    math::{Vec2, Vec3},
+    prelude::*,
+    render::render_resource::{Extent3d, TextureDimension, TextureFormat},
+    sprite::{Sprite, SpriteBundle},
+};
+use bevy_rapier2d::{
+    physics::{RigidBodyBundle, RigidBodyPositionSync},
+    prelude::*,
 };
 
 #[derive(Debug)]
@@ -53,11 +45,11 @@ impl UpdateRule {
         }
     }
 
-    fn update(&self, info: &mut WorldInfo, target: Target) {
+    fn update(&self, commands: &mut Commands, info: &mut WorldInfo, target: Target) {
         match self {
             UpdateRule::Gravity => gravity_update(info, target),
             UpdateRule::Liquid => liquid_update(info, target),
-            UpdateRule::Spell(c) => spell_update(c, info, target),
+            UpdateRule::Spell(c) => spell_update(commands, info, c, target),
         }
     }
 }
@@ -81,6 +73,8 @@ fn gravity_update(info: &mut WorldInfo, target: Target) {
         if block2.is_none() {
             break;
         }
+
+        // TODO: When the 'touched' field is added, touch the target here.
         let mut block2 = block2.unwrap();
         let block2_data = block2.data();
 
@@ -133,6 +127,8 @@ fn liquid_update(info: &mut WorldInfo, target: Target) {
         if block2.is_none() {
             continue;
         }
+
+        // TODO: When the 'touched' field is added, touch the target here.
         let mut block2 = block2.unwrap();
         let block2_data = block2.data();
 
@@ -174,40 +170,49 @@ fn mark_unstable(info: &mut WorldInfo, x: i32, y: i32, id: u16) {
     }
 }
 
-fn spell_update(spell_rule: &SpellRule, info: &mut WorldInfo, source: Target) {
+fn spell_update(
+    commands: &mut Commands,
+    info: &mut WorldInfo,
+    spell_rule: &SpellRule,
+    source: Target,
+) {
     let mut results = vec![];
     spell_rule
         .spell
         .cast(info, SpellTarget::new(source), &mut |r| results.push(r));
+
+    // TODO: When the 'touched' field is added, touch the target here if 'results' is not empty.
 
     for result in results {
         if rand::random::<f32>() > spell_rule.rate {
             continue;
         }
 
+        let mut target = result.target.target;
+
         for effect in result.effects {
             // TODO: Add/Send should be handled differently.
             match effect {
-                SpellEffect::Summon => todo!(),
+                SpellEffect::Summon => {
+                    target = Target::Entity(spawn_summon(commands, info, target))
+                }
                 SpellEffect::Add(Static(_)) => todo!(),
                 SpellEffect::Remove(_) => todo!(),
-                SpellEffect::Add(Material(id)) | SpellEffect::Send(Material(id)) => {
-                    match result.target.target {
-                        Target::Block(x, y) => {
-                            let mut block = info.get_block(x, y).unwrap();
-                            block.id = *id;
-                            info.set_block(x, y, block);
-                        }
-                        Target::Entity(_) => todo!(),
+                SpellEffect::Add(Material(id)) | SpellEffect::Send(Material(id)) => match target {
+                    Target::Block(x, y) => {
+                        let mut block = info.get_block(x, y).unwrap();
+                        block.id = *id;
+                        info.set_block(x, y, block);
                     }
-                }
+                    Target::Entity(_) => todo!(),
+                },
                 SpellEffect::Add(Dynamic(property)) | SpellEffect::Send(Dynamic(property)) => {
-                    info.set(result.target.target, *property, 1.0);
+                    info.set(target, *property, 1.0);
                 }
                 SpellEffect::Send(Static(_)) => todo!(),
                 SpellEffect::Receive(Material(_)) => todo!(),
                 SpellEffect::Receive(Dynamic(property)) => {
-                    info.set(result.target.target, *property, 0.0);
+                    info.set(target, *property, 0.0);
                 }
                 SpellEffect::Receive(Static(_)) => todo!(),
             }
@@ -215,8 +220,34 @@ fn spell_update(spell_rule: &SpellRule, info: &mut WorldInfo, source: Target) {
     }
 
     if let Some(mana_id) = spell_rule.drain {
-        info.set(source, DynamicProperty::Mana(mana_id), 0.0);
+        // TODO: This doesn't really work and probably isn't the right way to implement a mana cost
+        // for spells.
+        let mana = info.get(source, Dynamic(Mana(mana_id)));
+        info.set(source, Mana(mana_id), f32::max(0.0, mana - 0.1));
     }
+}
+
+fn spawn_summon(commands: &mut Commands, info: &WorldInfo, parent: Target) -> Entity {
+    let parent_position = match parent {
+        Target::Entity(entity) => info.entity_colliders.get(&entity).unwrap().center(),
+        Target::Block(_, _) => todo!(),
+    };
+
+    let position = RigidBodyPosition {
+        position: parent_position.into(),
+        next_position: Isometry::identity(),
+    };
+
+    commands
+        .spawn_bundle(SpriteBundle::default())
+        .insert_bundle(RigidBodyBundle {
+            position: RigidBodyPositionComponent(position),
+            ..Default::default()
+        })
+        // TODO: .insert_bundle(ColliderBundle::default())
+        .insert(RigidBodyPositionSync::Discrete)
+        .insert(ChemEntity)
+        .id()
 }
 
 pub(crate) struct UpdateRules {
@@ -277,6 +308,7 @@ pub(crate) fn system_setup_block_grid(mut commands: Commands, mut textures: ResM
 
 /// Step the simulation, update the graphics
 pub(crate) fn system_update_block_grid(
+    mut commands: Commands,
     // mut block_grid: ResMut<BlockGrid>,
     update_rules: Res<UpdateRules>,
     mut textures: ResMut<Assets<Image>>,
@@ -299,7 +331,7 @@ pub(crate) fn system_update_block_grid(
     span.exit();
 
     let span = info_span!("Stepping blocks").entered();
-    step(&mut info, &update_rules);
+    step(&mut commands, &mut info, &update_rules);
     span.exit();
 
     let span = info_span!("Updating block sprites").entered();
@@ -324,7 +356,7 @@ pub(crate) fn system_update_block_grid(
     span.exit();
 }
 
-fn step(info: &mut WorldInfo, update_rules: &UpdateRules) {
+fn step(commands: &mut Commands, info: &mut WorldInfo, update_rules: &UpdateRules) {
     let span = info_span!("Reset flags").entered();
     info.reset_changes();
     span.exit();
@@ -333,7 +365,7 @@ fn step(info: &mut WorldInfo, update_rules: &UpdateRules) {
         let span = info_span!("Rule", rule = &bevy::utils::tracing::field::debug(rule)).entered();
         let target_list = info.active_matching(rule.only_run_on()).collect::<Vec<_>>();
         for target in target_list {
-            rule.update(info, target);
+            rule.update(commands, info, target);
         }
         span.exit();
     }
